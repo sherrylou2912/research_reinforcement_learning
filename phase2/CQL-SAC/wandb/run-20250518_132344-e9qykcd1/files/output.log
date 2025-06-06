@@ -1,0 +1,12 @@
+/opt/anaconda3/envs/d4rl_new/lib/python3.10/site-packages/minari/dataset/minari_dataset.py:204: UserWarning: Installed mujoco version 3.3.2 does not meet the requirement ==3.2.3.
+We recommend to install the required version with `pip install "mujoco==3.2.3"`
+  warnings.warn(
+[Warmup] BC Pretraining ...
+/opt/anaconda3/envs/d4rl_new/lib/python3.10/site-packages/torch/utils/data/dataloader.py:683: UserWarning: 'pin_memory' argument is set as true but not supported on MPS now, then device pinned memory won't be used.
+  warnings.warn(warn_msg)
+  [Warmup epoch 1] done
+  [Warmup epoch 2] done
+  [Warmup epoch 3] done
+  [Warmup epoch 4] done
+  [Warmup epoch 5] done
+[Warmup] Done.

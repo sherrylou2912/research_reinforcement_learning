@@ -1,0 +1,7 @@
+{"time":"2025-05-18T13:23:44.726127-05:00","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/Users/xinyuehe/Documents/github/research_reinforcement_learning/CQL-SAC/wandb/run-20250518_132344-e9qykcd1/logs/debug-core.log"}
+{"time":"2025-05-18T13:23:44.939984-05:00","level":"INFO","msg":"created new stream","id":"e9qykcd1"}
+{"time":"2025-05-18T13:23:44.940043-05:00","level":"INFO","msg":"stream: started","id":"e9qykcd1"}
+{"time":"2025-05-18T13:23:44.940077-05:00","level":"INFO","msg":"writer: Do: started","stream_id":"e9qykcd1"}
+{"time":"2025-05-18T13:23:44.940214-05:00","level":"INFO","msg":"handler: started","stream_id":"e9qykcd1"}
+{"time":"2025-05-18T13:23:44.940268-05:00","level":"INFO","msg":"sender: started","stream_id":"e9qykcd1"}
+{"time":"2025-05-18T13:23:45.058524-05:00","level":"INFO","msg":"Starting system monitor"}

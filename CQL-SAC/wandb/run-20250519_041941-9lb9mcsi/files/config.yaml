@@ -1,0 +1,57 @@
+_wandb:
+    value:
+        cli_version: 0.19.11
+        m: []
+        python_version: 3.8.20
+        t:
+            "1":
+                - 1
+                - 55
+            "2":
+                - 1
+                - 55
+            "3":
+                - 1
+                - 2
+                - 3
+                - 13
+                - 16
+                - 23
+                - 55
+                - 61
+            "4": 3.8.20
+            "5": 0.19.11
+            "8":
+                - 5
+            "12": 0.19.11
+            "13": linux-x86_64
+batch_size:
+    value: 512
+cql_weight:
+    value: 1
+env:
+    value: halfcheetah-medium-v2
+episodes:
+    value: 100
+eval_every:
+    value: 1
+hidden_size:
+    value: 256
+learning_rate:
+    value: 0.0003
+log_video:
+    value: 0
+run_name:
+    value: CQL_SAC_1101
+save_every:
+    value: 100
+seed:
+    value: 1101
+target_action_gap:
+    value: 10
+tau:
+    value: 0.005
+temperature:
+    value: 1
+with_lagrange:
+    value: 0

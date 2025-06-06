@@ -1,0 +1,23 @@
+2025-05-18 13:23:44,695 INFO    MainThread:51529 [wandb_setup.py:_flush():70] Current SDK version is 0.19.11
+2025-05-18 13:23:44,695 INFO    MainThread:51529 [wandb_setup.py:_flush():70] Configure stats pid to 51529
+2025-05-18 13:23:44,695 INFO    MainThread:51529 [wandb_setup.py:_flush():70] Loading settings from /Users/xinyuehe/.config/wandb/settings
+2025-05-18 13:23:44,695 INFO    MainThread:51529 [wandb_setup.py:_flush():70] Loading settings from /Users/xinyuehe/Documents/github/research_reinforcement_learning/CQL-SAC/wandb/settings
+2025-05-18 13:23:44,695 INFO    MainThread:51529 [wandb_setup.py:_flush():70] Loading settings from environment variables
+2025-05-18 13:23:44,695 INFO    MainThread:51529 [wandb_init.py:setup_run_log_directory():724] Logging user logs to /Users/xinyuehe/Documents/github/research_reinforcement_learning/CQL-SAC/wandb/run-20250518_132344-e9qykcd1/logs/debug.log
+2025-05-18 13:23:44,695 INFO    MainThread:51529 [wandb_init.py:setup_run_log_directory():725] Logging internal logs to /Users/xinyuehe/Documents/github/research_reinforcement_learning/CQL-SAC/wandb/run-20250518_132344-e9qykcd1/logs/debug-internal.log
+2025-05-18 13:23:44,695 INFO    MainThread:51529 [wandb_init.py:init():852] calling init triggers
+2025-05-18 13:23:44,695 INFO    MainThread:51529 [wandb_init.py:init():857] wandb.init called with sweep_config: {}
+config: {'run_name': 'CQL_SAC_hopper_seed1101', 'env': 'mujoco/hopper/medium-v0', 'episodes': 500, 'seed': 1101, 'batch_size': 256, 'hidden_size': 256, 'lr': 0.0001, 'tau': 0.002, 'eval_every': 2, 'save_every': 100, 'eval_further': 0, 'eval_rank': 1, 'temp': 1.0, 'with_lagrange': True, 'cql_weight': 1.0, 'target_gap': 2.0, '_wandb': {}}
+2025-05-18 13:23:44,696 INFO    MainThread:51529 [wandb_init.py:init():893] starting backend
+2025-05-18 13:23:44,696 INFO    MainThread:51529 [wandb_init.py:init():897] sending inform_init request
+2025-05-18 13:23:44,722 INFO    MainThread:51529 [backend.py:_multiprocessing_setup():101] multiprocessing start_methods=spawn,fork,forkserver, using: spawn
+2025-05-18 13:23:44,722 INFO    MainThread:51529 [wandb_init.py:init():907] backend started and connected
+2025-05-18 13:23:44,724 INFO    MainThread:51529 [wandb_init.py:init():1005] updated telemetry
+2025-05-18 13:23:44,735 INFO    MainThread:51529 [wandb_init.py:init():1029] communicating run to backend with 90.0 second timeout
+2025-05-18 13:23:45,050 INFO    MainThread:51529 [wandb_init.py:init():1104] starting run threads in backend
+2025-05-18 13:23:45,125 INFO    MainThread:51529 [wandb_run.py:_console_start():2573] atexit reg
+2025-05-18 13:23:45,125 INFO    MainThread:51529 [wandb_run.py:_redirect():2421] redirect: wrap_raw
+2025-05-18 13:23:45,126 INFO    MainThread:51529 [wandb_run.py:_redirect():2490] Wrapping output streams.
+2025-05-18 13:23:45,126 INFO    MainThread:51529 [wandb_run.py:_redirect():2513] Redirects installed.
+2025-05-18 13:23:45,127 INFO    MainThread:51529 [wandb_init.py:init():1150] run started, returning control to user process
+2025-05-18 13:24:16,506 INFO    MainThread:51529 [wandb_watch.py:_watch():71] Watching

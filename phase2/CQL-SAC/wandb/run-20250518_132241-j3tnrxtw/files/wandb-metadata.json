@@ -1,0 +1,44 @@
+{
+  "os": "macOS-15.3.2-arm64-arm-64bit",
+  "python": "CPython 3.10.17",
+  "startedAt": "2025-05-18T18:22:41.945228Z",
+  "program": "/Users/xinyuehe/Documents/github/research_reinforcement_learning/CQL-SAC/train_offline.py",
+  "codePath": "CQL-SAC/train_offline.py",
+  "git": {
+    "remote": "https://github.com/sherrylou2912/research_reinforcement_learning.git",
+    "commit": "abb56ede33744b1951ad9c765d23a13ef5755e23"
+  },
+  "email": "sherrylou2912@gmail.com",
+  "root": "/Users/xinyuehe/Documents/github/research_reinforcement_learning/CQL-SAC",
+  "host": "Have-a-nice-day.local",
+  "executable": "/opt/anaconda3/envs/d4rl_new/bin/python",
+  "codePathLocal": "train_offline.py",
+  "cpu_count": 8,
+  "cpu_count_logical": 8,
+  "disk": {
+    "/": {
+      "total": "494384795648",
+      "used": "338009133056"
+    },
+    "/System/Volumes/Data": {
+      "total": "494384795648",
+      "used": "338009133056"
+    }
+  },
+  "memory": {
+    "total": "8589934592"
+  },
+  "cpu": {
+    "count": 8,
+    "countLogical": 8
+  },
+  "apple": {
+    "name": "Apple M1",
+    "ecpuCores": 4,
+    "pcpuCores": 4,
+    "gpuCores": 8,
+    "memoryGb": 8,
+    "swapTotalBytes": "4294967296",
+    "ramTotalBytes": "8589934592"
+  }
+}
