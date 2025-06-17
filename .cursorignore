@@ -1,0 +1,14 @@
+# Cursor ignore file
+
+# Code style rules
+rule: all_comments_in_english  # All code comments must be in English
+
+# Ignore patterns
+*.pyc
+__pycache__/
+.DS_Store
+.env
+.venv/
+venv/
+*.log
+wandb/ 
