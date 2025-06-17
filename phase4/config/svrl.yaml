@@ -1,0 +1,24 @@
+# Inherit from SAC config
+defaults:
+  - sac
+
+# SVRL specific
+n_action_sample: 10
+mask_prob: 0.5
+lambda_struct: 0.5
+rank: 10
+
+# Override some SAC settings
+project_name: "Offline SVRL"
+group: "halfcheetah-medium"
+name: "svrl_default"
+
+# Training
+episodes: 1000
+batch_size: 256
+learning_rate: 3e-4
+
+# Evaluation
+eval_episodes: 10
+eval_every: 10
+save_every: 100

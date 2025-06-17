@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: phase4
+Version: 0.1.0
+Requires-Dist: torch>=1.8.0
+Requires-Dist: numpy>=1.19.0
+Requires-Dist: gym>=0.17.0
+Requires-Dist: wandb>=0.12.0
+Requires-Dist: d4rl>=1.1
+Dynamic: requires-dist

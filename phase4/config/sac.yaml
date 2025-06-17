@@ -1,0 +1,35 @@
+# Environment
+env: "halfcheetah-medium-v2"
+seed: 42
+
+# Network
+hidden_size: 256
+activation: "relu"
+
+# Training
+episodes: 1000
+batch_size: 256
+learning_rate: 3e-4
+gamma: 0.99
+tau: 0.005
+alpha: 0.2
+target_entropy: null  # if null, will be set to -dim(A)
+
+# Buffer
+buffer_size: 1000000
+initial_random_steps: 10000
+
+# Evaluation
+eval_episodes: 10
+eval_every: 10
+save_every: 100
+
+# Logging
+log_every: 1
+use_wandb: true
+project_name: "Offline SAC"
+group: "halfcheetah-medium"
+name: "sac_default"
+
+# Device
+device: "cuda"  # or "cpu"

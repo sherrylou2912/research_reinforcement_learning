@@ -5,6 +5,19 @@
 - 重新实验SVRL-SAC
 - 实现UA-LQE-SAC
 
+--- 
+## Literature Review
+### Harnessing Structures for Value-Based Planning and Reinforcement Learning
+    proposed off-policy SVRL: random mask + matrix estimation 
+    https://arxiv.org/abs/1909.12255
+
+### Uncertainty-aware Low-Rank Q-Matrix Estimation for Deep Reinforcement Learning
+    investigate the relationship between uncertainty, rank and training step 
+    proposed off-policy UA-LQE: uncertainty mask + matrix estimation 
+    https://arxiv.org/pdf/2111.10103
+
+
+
 ---
 
 ## 🧠 算法介绍
