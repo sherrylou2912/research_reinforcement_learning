@@ -23,17 +23,26 @@ def evaluate_policy(
     episode_returns = []
     
     for _ in range(n_episodes):
-        state = env.reset()
+        state, _ = env.reset()  # Gymnasium返回(state, info)
         episode_return = 0.0
         done = False
+        truncated = False
         
-        while not done:
+        while not (done or truncated):
+            # 确保状态是正确的形状
+            if isinstance(state, tuple):
+                state = state[0]  # 有些环境返回(state, info)
+            if isinstance(state, dict):
+                state = state['observations']  # 有些环境使用dict observation
+                
+            # 获取动作
             if deterministic:
-                action = policy.get_action(state, eval=True)
+                action = policy.get_action(state)
             else:
                 action = policy.get_action(state)
                 
-            next_state, reward, done, _ = env.step(action)
+            # Gymnasium现在返回5个值
+            next_state, reward, done, truncated, _ = env.step(action)
             episode_return += reward
             state = next_state
             

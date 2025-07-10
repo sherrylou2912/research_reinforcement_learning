@@ -81,8 +81,43 @@ class SAC(nn.Module):
             Normalized state
         """
         if self.normalization_stats is None:
+            print("Warning: No normalization stats available, using raw state")
             return torch.as_tensor(state).float().to(self.device)
-        return (state - self.normalization_stats['state_mean']) / self.normalization_stats['state_std']
+            
+        # Convert to tensor if needed
+        if not isinstance(state, torch.Tensor):
+            state = torch.FloatTensor(state)
+            
+        # Debug info
+        if hasattr(self, 'debug_counter'):
+            self.debug_counter += 1
+        else:
+            self.debug_counter = 0
+            print("\n=== State Normalization Debug Info ===")
+            print(f"Input state type: {type(state)}")
+            print(f"Input state shape: {state.shape}")
+            print(f"State mean shape: {self.normalization_stats['state_mean'].shape}")
+            print(f"State std shape: {self.normalization_stats['state_std'].shape}")
+            
+        # Ensure state is 2D: (batch_size, state_dim)
+        if state.dim() == 1:
+            state = state.unsqueeze(0)
+            
+        # Convert normalization stats to tensors on the same device
+        state_mean = torch.FloatTensor(self.normalization_stats['state_mean']).to(state.device)
+        state_std = torch.FloatTensor(self.normalization_stats['state_std']).to(state.device)
+        
+        # Normalize
+        normalized_state = (state - state_mean) / state_std
+        
+        # Print first normalization result
+        if self.debug_counter == 0:
+            print(f"Example normalization:")
+            print(f"  Raw state: {state[0]}")
+            print(f"  Normalized state: {normalized_state[0]}")
+            print("=== End Debug Info ===\n")
+            
+        return normalized_state.to(self.device)
     
     def get_action(self, state: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
         """
@@ -96,13 +131,13 @@ class SAC(nn.Module):
         """
         state = self.normalize_state(state)
         if not isinstance(state, torch.Tensor):
-            state = torch.FloatTensor(state).to(self.device)
+            state = torch.FloatTensor(state)
         if state.dim() == 1:
             state = state.unsqueeze(0)
             
         with torch.no_grad():
             action, _ = self.actor.evaluate(state)
-        return action.cpu().numpy()
+        return action.cpu().numpy().squeeze()  # 确保返回(6,)而不是(1, 6)
     
     def update(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
         """

@@ -1,8 +1,7 @@
 torch>=2.2.0
 numpy>=1.26.4
 gymnasium>=0.29.1
-minari>=0.5.2
-d4rl @ git+https://github.com/rail-berkeley/d4rl@master#egg=d4rl
+minari
 wandb>=0.16.3
 pyyaml>=6.0.1
 tqdm>=4.66.2
