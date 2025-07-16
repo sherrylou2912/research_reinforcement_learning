@@ -53,10 +53,17 @@ class SAC(nn.Module):
         self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.learning_rate)
         self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.learning_rate)
         
-        # Initialize temperature parameter alpha
-        self.target_entropy = -action_size  # Target entropy is -|A|
-        self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-        self.alpha_optimizer = optim.Adam([self.log_alpha], lr=self.learning_rate)
+        # Initialize temperature parameter alpha with optional auto-tuning
+        self.auto_tune_alpha = config.get('auto_tune_alpha', True)
+        if self.auto_tune_alpha:
+            self.target_entropy = config.get('target_entropy', -action_size)
+            self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+            self.alpha_optimizer = optim.Adam([self.log_alpha], lr=self.learning_rate)
+        else:
+            self.alpha = torch.tensor(config.get('alpha', 0.2), device=self.device)
+            self.log_alpha = None
+            self.alpha_optimizer = None
+            self.target_entropy = None
         
         # Initialize normalization statistics
         self.normalization_stats = None
@@ -88,16 +95,6 @@ class SAC(nn.Module):
         if not isinstance(state, torch.Tensor):
             state = torch.FloatTensor(state)
             
-        # Debug info
-        if hasattr(self, 'debug_counter'):
-            self.debug_counter += 1
-        else:
-            self.debug_counter = 0
-            print("\n=== State Normalization Debug Info ===")
-            print(f"Input state type: {type(state)}")
-            print(f"Input state shape: {state.shape}")
-            print(f"State mean shape: {self.normalization_stats['state_mean'].shape}")
-            print(f"State std shape: {self.normalization_stats['state_std'].shape}")
             
         # Ensure state is 2D: (batch_size, state_dim)
         if state.dim() == 1:
@@ -110,12 +107,6 @@ class SAC(nn.Module):
         # Normalize
         normalized_state = (state - state_mean) / state_std
         
-        # Print first normalization result
-        if self.debug_counter == 0:
-            print(f"Example normalization:")
-            print(f"  Raw state: {state[0]}")
-            print(f"  Normalized state: {normalized_state[0]}")
-            print("=== End Debug Info ===\n")
             
         return normalized_state.to(self.device)
     
@@ -168,7 +159,14 @@ class SAC(nn.Module):
             next_actions, next_log_probs = self.actor.evaluate(next_states)
             q1_next = self.critic1_target(next_states, next_actions)
             q2_next = self.critic2_target(next_states, next_actions)
-            q_next = torch.min(q1_next, q2_next) - self.log_alpha.exp() * next_log_probs
+            
+            # Use appropriate alpha value for entropy term
+            if self.auto_tune_alpha:
+                alpha_value = self.log_alpha.exp()
+            else:
+                alpha_value = self.alpha
+                
+            q_next = torch.min(q1_next, q2_next) - alpha_value * next_log_probs
             q_target = rewards + (1 - dones) * self.gamma * q_next
         
         # Update critic 1
@@ -191,16 +189,26 @@ class SAC(nn.Module):
         q1_pred = self.critic1(states, actions_pred)
         q2_pred = self.critic2(states, actions_pred)
         q_pred = torch.min(q1_pred, q2_pred)
-        actor_loss = (self.log_alpha.exp() * log_probs - q_pred).mean()
+        
+        # Use appropriate alpha value
+        if self.auto_tune_alpha:
+            alpha_value = self.log_alpha.exp()
+        else:
+            alpha_value = self.alpha
+            
+        actor_loss = (alpha_value * log_probs - q_pred).mean()
         actor_loss.backward()
         self.actor_optimizer.step()
         
-        # Update temperature
-        self.alpha_optimizer.zero_grad()
-        _, new_log_probs = self.actor.evaluate(states)  # Get new log probs
-        alpha_loss = -(self.log_alpha.exp() * (new_log_probs + self.target_entropy).detach()).mean()
-        alpha_loss.backward()
-        self.alpha_optimizer.step()
+        # Update temperature (only if auto-tuning is enabled)
+        if self.auto_tune_alpha:
+            self.alpha_optimizer.zero_grad()
+            _, new_log_probs = self.actor.evaluate(states)  # Get new log probs
+            alpha_loss = -(self.log_alpha.exp() * (new_log_probs + self.target_entropy).detach()).mean()
+            alpha_loss.backward()
+            self.alpha_optimizer.step()
+        else:
+            alpha_loss = torch.tensor(0.0, device=self.device)
         
         # Update target networks
         update_target(self.critic1_target, self.critic1, self.tau)
@@ -211,7 +219,7 @@ class SAC(nn.Module):
             'critic2_loss': critic2_loss.item(),
             'actor_loss': actor_loss.item(),
             'alpha_loss': alpha_loss.item(),
-            'alpha': self.log_alpha.exp().item(),
+            'alpha': self.log_alpha.exp().item() if self.auto_tune_alpha else self.alpha.item(),
             'q_value': q_pred.mean().item(),
             'batch_reward': rewards.mean().item()
         }
@@ -232,10 +240,15 @@ class SAC(nn.Module):
             'actor_optimizer_state_dict': self.actor_optimizer.state_dict(),
             'critic1_optimizer_state_dict': self.critic1_optimizer.state_dict(),
             'critic2_optimizer_state_dict': self.critic2_optimizer.state_dict(),
-            'alpha_optimizer_state_dict': self.alpha_optimizer.state_dict(),
-            'log_alpha': self.log_alpha,
+            'auto_tune_alpha': self.auto_tune_alpha,
             'normalization_stats': self.normalization_stats
         }
+        
+        if self.auto_tune_alpha:
+            checkpoint['alpha_optimizer_state_dict'] = self.alpha_optimizer.state_dict()
+            checkpoint['log_alpha'] = self.log_alpha
+        else:
+            checkpoint['alpha'] = self.alpha
         torch.save(checkpoint, path)
     
     def load(self, path: str):
@@ -254,8 +267,15 @@ class SAC(nn.Module):
         self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
         self.critic1_optimizer.load_state_dict(checkpoint['critic1_optimizer_state_dict'])
         self.critic2_optimizer.load_state_dict(checkpoint['critic2_optimizer_state_dict'])
-        self.alpha_optimizer.load_state_dict(checkpoint['alpha_optimizer_state_dict'])
-        self.log_alpha = checkpoint['log_alpha']
+        
+        # Load alpha parameters based on auto-tune setting
+        self.auto_tune_alpha = checkpoint.get('auto_tune_alpha', True)
+        if self.auto_tune_alpha:
+            self.alpha_optimizer.load_state_dict(checkpoint['alpha_optimizer_state_dict'])
+            self.log_alpha = checkpoint['log_alpha']
+        else:
+            self.alpha = checkpoint['alpha']
+            
         self.normalization_stats = checkpoint['normalization_stats']
 
 if __name__ == "__main__":
@@ -276,4 +296,3 @@ if __name__ == "__main__":
         'hidden_size': 256
     }
     agent = SAC(state_size, action_size, config)
-    print("Agent created successfully!")

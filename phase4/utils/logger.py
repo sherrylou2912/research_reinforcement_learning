@@ -11,7 +11,9 @@ class Logger:
         project_name: str,
         config: Dict[str, Any],
         output_dir: str = "logs",
-        use_wandb: bool = True
+        use_wandb: bool = True,
+        group: str = None,
+        name: str = None
     ):
         """
         Initialize logger for experiment tracking.
@@ -33,7 +35,10 @@ class Logger:
             wandb.init(
                 project=project_name,
                 config=config,
-                dir=output_dir
+                group=group,
+                name=name,
+                dir=output_dir,
+                reinit=True
             )
         
         # Save config

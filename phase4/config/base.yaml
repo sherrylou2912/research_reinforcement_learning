@@ -1,0 +1,35 @@
+# ===================== Base Configuration =====================
+# Common settings shared across all algorithms
+# Override specific parameters in algorithm-specific config files
+
+# ===================== Environment Configuration =====================
+env: "HalfCheetah-v4"  # Gymnasium environment name
+seed: 42               # Random seed for reproducibility
+
+# ===================== Network Architecture =====================
+hidden_size: 256       # Hidden layer size for Actor and Critic networks
+activation: "relu"     # Activation function: "relu", "tanh", "elu", "gelu"
+
+# ===================== Training Parameters =====================
+episodes: 100          # Total number of training episodes
+batch_size: 256        # Mini-batch size for gradient updates
+learning_rate: 0.0003  # Learning rate for all optimizers
+gamma: 0.99            # Discount factor for future rewards [0,1]
+tau: 0.005             # Target network soft update coefficient [0,1]
+
+# ===================== Evaluation Settings =====================
+eval_episodes: 10      # Number of episodes for policy evaluation
+eval_every: 3       # Evaluate policy every N episodes
+log_every: 100         # Log training metrics every N steps
+
+# ===================== Logging Configuration =====================
+use_wandb: false       # Enable Weights & Biases logging
+project_name: "Offline RL"  # W&B project name
+group: "default"       # Experiment group for organization
+name: "base"           # Specific experiment identifier
+save_best: true        # Save best performing model
+
+# ===================== Hardware Settings =====================
+device: "cuda"         # Compute device: "cuda" (GPU) or "cpu"
+num_workers: 4         # Data loader worker processes
+pin_memory: true       # Pin memory for faster GPU transfer

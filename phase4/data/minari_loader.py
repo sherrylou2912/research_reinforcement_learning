@@ -35,11 +35,33 @@ class MinariDataset(Dataset):
                 raise
         
         # 转换为numpy数组
-        self.observations = self.dataset.observations
-        self.actions = self.dataset.actions
-        self.rewards = self.dataset.rewards
-        self.terminals = self.dataset.terminations
-        self.next_observations = self.dataset.next_observations
+        all_episodes = list(self.dataset.iterate_episodes())
+        
+        # 合并所有episode的数据
+        self.observations = np.concatenate([ep.observations for ep in all_episodes])
+        self.actions = np.concatenate([ep.actions for ep in all_episodes])
+        self.rewards = np.concatenate([ep.rewards for ep in all_episodes])
+        self.terminals = np.concatenate([ep.terminations for ep in all_episodes])
+        
+        # 构建 next_observations
+        self.next_observations = []
+        for ep in all_episodes:
+            # 对于每个 episode，next_observations 是当前 observations 向后移一位
+            # 最后一个 next_observation 使用零向量或当前状态
+            ep_next_obs = np.roll(ep.observations, -1, axis=0)
+            ep_next_obs[-1] = ep.observations[-1]  # 最后一个状态的下一个状态仍然是它自己
+            self.next_observations.append(ep_next_obs)
+        self.next_observations = np.concatenate(self.next_observations)
+        
+        # 确保所有数组长度一致
+        min_length = min(len(self.observations), len(self.actions), 
+                        len(self.rewards), len(self.terminals), len(self.next_observations))
+        
+        self.observations = self.observations[:min_length]
+        self.actions = self.actions[:min_length]
+        self.rewards = self.rewards[:min_length]
+        self.terminals = self.terminals[:min_length]
+        self.next_observations = self.next_observations[:min_length]
         
         # 计算归一化统计量
         self.state_mean = None
@@ -70,6 +92,10 @@ class MinariDataset(Dataset):
         return len(self.observations)
     
     def __getitem__(self, idx: int) -> Dict[str, np.ndarray]:
+        # 检查索引是否在有效范围内
+        if idx >= len(self.observations):
+            raise IndexError(f"Index {idx} is out of bounds for dataset with {len(self.observations)} samples")
+        
         return {
             'observations': self.observations[idx].astype(np.float32),
             'actions': self.actions[idx].astype(np.float32),
@@ -112,16 +138,21 @@ def create_minari_dataloader(
         download=download
     )
     
+    # 确保batch_size不会导致访问超出范围的索引
+    total_samples = len(dataset)
+    effective_batch_size = min(batch_size, total_samples // 2)  # 使用更保守的批处理大小
+    
     # 创建数据加载器
     data_loader = DataLoader(
         dataset,
-        batch_size=batch_size,
+        batch_size=effective_batch_size,
         shuffle=True,
-        num_workers=num_workers,
+        num_workers=0,  # 禁用多进程加载
         pin_memory=pin_memory and device == 'cuda',
-        drop_last=True,
-        persistent_workers=True if num_workers > 0 else False
+        drop_last=True
     )
+    
+    print(f"Dataset loaded with batch size {effective_batch_size}")
     
     # 返回归一化统计量
     normalization_stats = None

@@ -1,3 +1,4 @@
+
 import os
 import gymnasium as gym
 # import d4rl  # 移除d4rl
@@ -16,9 +17,26 @@ from utils.logger import Logger
 from utils.eval_metrics import evaluate_policy
 
 def load_config(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file."""
+    """Load configuration from YAML file with inheritance support."""
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
+    
+    # Handle inheritance via 'defaults' key
+    if 'defaults' in config:
+        base_configs = config.pop('defaults')
+        merged_config = {}
+        
+        # Load base configs in order
+        for base_name in base_configs:
+            base_path = os.path.join(os.path.dirname(config_path), f"{base_name}.yaml")
+            if os.path.exists(base_path):
+                base_config = load_config(base_path)  # Recursive loading
+                merged_config.update(base_config)
+        
+        # Override with current config
+        merged_config.update(config)
+        config = merged_config
+    
     return config
 
 def create_agent(agent_type: str, env, config: Dict[str, Any]):
@@ -58,13 +76,12 @@ def train_once(args, config, seed):
     print("Creating environment...")
     env = gym.make(config['env'])
     eval_env = gym.make(config['env'])
-    
+
     # 获取维度
-    sample_batch = next(iter(data_loader))
-    state_size = sample_batch['observations'].shape[1]
-    action_size = sample_batch['actions'].shape[1]
+    state_size = env.observation_space.shape[0]
+    action_size = env.action_space.shape[0]
     print(f"State size: {state_size}, Action size: {action_size}")
-    
+
     # 创建智能体
     print(f"Creating {args.agent} agent...")
     if args.agent == 'sac':
@@ -73,7 +90,7 @@ def train_once(args, config, seed):
         agent = CQL(state_size, action_size, config)
     else:
         agent = SVRL(state_size, action_size, config)
-    
+
     if args.normalize_states or args.normalize_rewards:
         agent.set_normalization_stats(normalization_stats)
         print("Normalization stats set")
@@ -87,15 +104,16 @@ def train_once(args, config, seed):
         'learning_rate': config['learning_rate'],
         'normalize_states': args.normalize_states,
         'normalize_rewards': args.normalize_rewards,
-        'group': config.get('group', 'default'),
-        'name': f"{config.get('name', 'default')}_seed{seed}"
+        'dataset': args.dataset
     }
     
     logger = Logger(
-        project_name=config['project_name'],
+        project_name=config.get('project_name', 'Offline RL'),
         config=logger_config,
         output_dir=os.path.join("logs", f"{args.agent}_{seed}"),
-        use_wandb=config['use_wandb']
+        use_wandb=config.get('use_wandb', False),
+        group=config.get('group', f"{args.agent}-{config['env']}"),
+        name=f"{config.get('name', args.agent)}_{args.dataset.split('/')[-1]}_seed{seed}"
     )
     print("Logger initialized")
     
@@ -178,6 +196,7 @@ def train_once(args, config, seed):
             if mean_return > best_return:
                 best_return = mean_return
                 if config.get('save_best', True):
+                    os.makedirs("models", exist_ok=True)
                     save_path = f"models/{args.agent}_{config['env']}_seed{seed}_best.pt"
                     agent.save(save_path)
                     print(f"New best model saved to {save_path}")

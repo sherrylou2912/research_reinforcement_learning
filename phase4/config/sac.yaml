@@ -1,44 +1,30 @@
-# ===================== Environment Configuration =====================
-# 环境设置
-env: "HalfCheetah-v5"  # Gymnasium环境名称
-seed: 42               # 随机种子，确保实验可复现
+# ===================== SAC Configuration =====================
+# Soft Actor-Critic algorithm specific settings
+# Inherits base settings and adds SAC-specific parameters
 
-# ===================== Network Architecture =====================
-# 网络结构
-hidden_size: 256       # Actor和Critic网络的隐藏层大小
-activation: "relu"     # 激活函数类型：可选 "relu", "tanh" 等
+# Import base configuration
+defaults:
+  - base
 
-# ===================== Training Parameters =====================
-# 训练参数
-episodes: 1000         # 训练的总episode数
-batch_size: 2048       # 每次更新的批量大小（增大以提高GPU利用率）
-learning_rate: 0.0003  # Actor和Critic的学习率
-gamma: 0.99           # 折扣因子，决定未来奖励的重要性（0-1）
-tau: 0.005            # 目标网络软更新系数，控制更新速度
-alpha: 0.2            # SAC温度参数，控制探索-利用平衡
-target_entropy: null   # 目标熵值，null则自动设置为-dim(A)
+# ===================== SAC-Specific Parameters =====================
+alpha: 0.2             # SAC temperature parameter for entropy regularization
+target_entropy: null   # Target entropy (-dim(action_space) if null)
+auto_tune_alpha: false  # Enable automatic temperature tuning
 
-# ===================== Replay Buffer =====================
-# 经验回放缓冲区
-buffer_size: 1000000   # 回放缓冲区大小
-initial_random_steps: 10000  # 初始随机采样步数
+# ===================== Override Base Settings =====================
+# Customize base parameters for SAC
+episodes: 200        # More episodes for SAC convergence
+batch_size: 2048  # Larger batch size for stable gradients
+project_name: "SAC Offline RL"
+group: "sac-experiments"
+name: "sac_default"
+use_wandb: true
 
-# ===================== Evaluation Settings =====================
-# 评估设置
-eval_episodes: 10     # 每次评估的episode数量
-eval_every: 10        # 每隔多少个episode进行一次评估
-save_every: 100       # 每隔多少个episode保存一次模型
-
-# ===================== Logging Configuration =====================
-# 日志设置
-log_every: 50         # 每隔多少个steps记录一次日志（增大间隔以减少IO开销）
-use_wandb: true      # 是否使用Weights & Biases记录实验
-project_name: "Offline SAC"  # W&B项目名称
-group: "halfcheetah-medium"  # 实验组名
-name: "sac_default"   # 具体实验名称
-
-# ===================== Hardware Settings =====================
-# 硬件设置
-device: "cuda"        # 使用的设备：'cuda'用GPU，'cpu'用CPU
-num_workers: 4        # 数据加载的工作进程数
-pin_memory: true      # 是否将数据固定在内存中（用于GPU训练）
+# ===================== Advanced SAC Settings =====================
+# Fine-tuning parameters for expert users
+critic_lr: 0.0003      # Critic learning rate (can differ from actor)
+actor_lr: 0.0003       # Actor learning rate
+alpha_lr: 0.0003       # Alpha (temperature) learning rate
+reward_scale: 1.0      # Reward scaling factor
+update_after: 1000     # Start updates after N steps
+update_every: 50       # Update frequency 

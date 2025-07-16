@@ -1,0 +1,29 @@
+# ===================== CQL Configuration =====================
+# Conservative Q-Learning for offline reinforcement learning
+# Extends SAC with conservative Q-value estimation
+
+# Import SAC configuration as base
+defaults:
+  - sac
+
+# ===================== CQL-Specific Parameters =====================
+cql_alpha: 1.0         # CQL regularization coefficient
+cql_tau: 10.0          # CQL temperature parameter for Boltzmann sampling
+with_lagrange: false   # Enable Lagrange multiplier for automatic CQL tuning
+target_action_gap: 1.0 # Target conservative gap when using Lagrange
+cql_min_q_weight: 5.0  # Weight for conservative Q-loss
+cql_clip_diff_min: -30  # Minimum clipping for Q-value differences
+cql_clip_diff_max: 30   # Maximum clipping for Q-value differences
+
+# ===================== Override Settings for CQL =====================
+project_name: "CQL Offline RL"
+group: "cql-experiments"
+name: "cql_default"
+batch_size: 1024       # Smaller batch size often works better for CQL
+
+# ===================== Advanced CQL Settings =====================
+n_actions_cql: 10      # Number of sampled actions for CQL loss
+beta: 1.0              # Behavior cloning regularization weight
+temp: 1.0              # Temperature for CQL action sampling
+max_q_backup: false    # Use max Q-backup instead of soft Q-backup
+deterministic_backup: false  # Use deterministic policy for backup

@@ -1,24 +1,32 @@
-# Inherit from SAC config
+# ===================== SVRL Configuration =====================
+# Structured Value-based Representation Learning
+# Combines CQL with low-rank matrix factorization
+
+# Import CQL configuration as base
 defaults:
-  - sac
+  - cql
 
-# SVRL specific
-n_action_sample: 10
-mask_prob: 0.5
-lambda_struct: 0.5
-rank: 10
+# ===================== SVRL-Specific Parameters =====================
+rank: 10               # Rank for low-rank matrix factorization
+svrl_weight: 1.0       # Weight for SVRL regularization loss
+n_action_sample: 10    # Number of actions to sample for structured loss
+mask_prob: 0.5         # Probability for masking in structured learning
+lambda_struct: 0.5     # Regularization weight for structure preservation
 
-# Override some SAC settings
-project_name: "Offline SVRL"
-group: "halfcheetah-medium"
+# ===================== Matrix Completion Settings =====================
+soft_impute_iters: 100      # Iterations for soft imputation algorithm
+soft_impute_threshold: 1e-4 # Convergence threshold for soft imputation
+use_soft_impute: true       # Enable soft imputation for matrix completion
+
+# ===================== Override Settings for SVRL =====================
+project_name: "SVRL Offline RL"
+group: "svrl-experiments"
 name: "svrl_default"
+batch_size: 256        # Moderate batch size for structured learning
+learning_rate: 3e-4    # Slightly higher LR for structured components
 
-# Training
-episodes: 1000
-batch_size: 256
-learning_rate: 3e-4
-
-# Evaluation
-eval_episodes: 10
-eval_every: 10
-save_every: 100
+# ===================== Advanced SVRL Settings =====================
+orthogonal_init: true  # Initialize U,V matrices with orthogonal initialization
+grad_clip_norm: 1.0    # Gradient clipping for stability
+struct_update_freq: 1  # Update structured components every N steps
+use_target_struct: true # Use target networks for structured components

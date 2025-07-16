@@ -1,0 +1,36 @@
+# ===================== UA-LQE Configuration =====================
+# Uncertainty-Aware Low-rank Q Ensemble
+# Advanced ensemble method for uncertainty estimation in offline RL
+
+# Import base configuration
+defaults:
+  - base
+
+# ===================== UA-LQE Specific Parameters =====================
+n_critics: 5           # Number of Q-networks in ensemble
+rank: 20               # Rank for low-rank approximation
+uncertainty_weight: 0.1 # Weight for uncertainty regularization
+ensemble_method: "variance"  # Method for uncertainty: "variance", "disagreement"
+
+# ===================== Low-rank Settings =====================
+use_low_rank: true     # Enable low-rank Q-function approximation
+rank_reg_weight: 0.01  # Regularization weight for rank constraint
+nuclear_norm_reg: 0.001 # Nuclear norm regularization
+
+# ===================== Ensemble Training =====================
+bootstrap_ratio: 0.8   # Bootstrap sampling ratio for each critic
+diversity_loss_weight: 0.05  # Weight for ensemble diversity loss
+update_ensemble_freq: 1      # Update all critics every N steps
+
+# ===================== Override Settings =====================
+project_name: "UA-LQE Offline RL"
+group: "ua-lqe-experiments"  
+name: "ua_lqe_default"
+batch_size: 256        # Moderate batch size for ensemble training
+learning_rate: 1e-4    # Lower LR for stable ensemble training
+
+# ===================== Advanced UA-LQE Settings =====================
+use_target_ensemble: true    # Use target networks for ensemble
+uncertainty_threshold: 0.5   # Threshold for high uncertainty detection
+conservative_weight: 2.0     # Conservative weighting for uncertain regions
+dropout_rate: 0.1           # Dropout for additional uncertainty
