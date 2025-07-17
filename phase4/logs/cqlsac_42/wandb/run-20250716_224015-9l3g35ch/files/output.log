@@ -115,4 +115,19 @@ Episode 21 completed in 65.12s
 
 Evaluating at episode 21...
 Evaluation results - Mean return: -372.66 ± 6.27
-Episode 22/200 [2074/3906] Steps: 84100/781200 (58.9 steps/s) Loss: 1.331
+Episode 22/200 [3874/3906] Steps: 85900/781200 (54.6 steps/s) Loss: 1.1663
+Episode 22 completed in 66.81s
+
+Evaluating at episode 22...
+Evaluation results - Mean return: -376.51 ± 6.69
+Episode 23/200 [3868/3906] Steps: 89800/781200 (58.9 steps/s) Loss: 1.0211
+Episode 23 completed in 66.70s
+
+Evaluating at episode 23...
+Evaluation results - Mean return: -379.78 ± 6.63
+Episode 24/200 [3862/3906] Steps: 93700/781200 (51.9 steps/s) Loss: 0.9585
+Episode 24 completed in 68.66s
+
+Evaluating at episode 24...
+Evaluation results - Mean return: -369.53 ± 8.34
+Episode 25/200 [556/3906] Steps: 94300/781200 (54.9 steps/s) Loss: 1.155
