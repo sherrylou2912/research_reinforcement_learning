@@ -7,6 +7,7 @@ from .networks import Critic, Actor
 import numpy as np
 import math 
 import copy
+from typing import Dict, Any
 
 class CQLSAC(nn.Module):
     """Conservative Q-Learning (CQL) algorithm implementation"""
@@ -27,11 +28,22 @@ class CQLSAC(nn.Module):
         """
         super(CQLSAC).__init__()
 
+        self.device = config.get('device', 'cuda')
         # SAC Hyperparameter 
         self.tau = config.get('tau', 5e-3)
         self.hidden_size = config.get('hidden_size', 256)
         self.learning_rate = config.get('learning_rate', 3e-4)
         self.clip_grad_param = config.get('clip_grad_param', 1)
+        self.target_entropy = config.get('target_entropy', -action_size)
+        self.auto_tune_alpha = config.get('auto_tune_alpha', True)
+        self.gamma = config.get('gamma', 0.99)
+
+        if self.auto_tune_alpha:
+            self.log_alpha = torch.tensor([0.0], requires_grad = True, device=self.device)
+            self.alpha = self.log_alpha.exp().detach()
+            self.alpha_optimizer = optim.Adam(params = [self.log_alpha], lr = self.learning_rate)
+        else:
+            self.alpha = config.get('alpha', 0.2)
 
         # CQL specific parameters
         self.temp = config.get('temp', 1.0)
@@ -48,175 +60,182 @@ class CQLSAC(nn.Module):
         self.num_random = config.get('num_random', 10)
 
         #Actor Network 
-        self.actor_local = Actor
+        self.log_std_min = config.get('log_std_min', -20)
+        self.log_std_max = config.get('log_std_max', 20)
+        self.actor_local = Actor(state_size, action_size, self.hidden_size, log_std_max= self.log_std_max, log_std_min = self.log_std_min, device=self.device)
+        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.learning_rate)
 
-    def _compute_cql_loss(
-        self,
-        states: torch.Tensor,
-        actions: torch.Tensor,
-        next_states: torch.Tensor,
-        rewards: torch.Tensor,
-        dones: torch.Tensor
-    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        #Critic Network
+        self.critic1 = Critic(state_size, action_size, self.hidden_size, self.device, 1229)
+        self.critic2 = Critic(state_size, action_size, self.hidden_size, self.device, 1101)
+
+        assert self.critic1.parameters() != self.critic2.parameters()
+
+        self.critic1_target = Critic(state_size, action_size, self.hidden_size, self.device, 1229)
+        self.critic2_target = Critic(state_size, action_size, self.hidden_size, self.device, 1101)
+
+        self.critic1_target.load_state_dict(self.critic1.state_dict())
+        self.critic2_target.load_state_dict(self.critic2.state_dict())
+
+        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=self.learning_rate)
+        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=self.learning_rate)
+
+    def get_action(self, state, eval = False):
+        """ Returns actions for given state as per current policy. """
+
+        state = torch.from_numpy(state).float().to(self.device)
+
+        with torch.no_grad():
+            if eval:
+                action = self.actor_local.get_det_action(state)
+            else:
+                action = self.actor_local.get_action(state)
+
+        return action.numpy()
+
+    def _calc_policy_loss(self, states, alpha):
+        actions_pred, log_pis = self.actor_local.evaluate(states)
+
+        q1 = self.critic1(states, actions_pred.squeeze(0))
+        q2 = self.critic2(states, actions_pred.squeeze(0))
+
+        min_Q = torch.min(q1, q2)
+
+        actor_loss = ((alpha * log_pis - min_Q)).mean()
+        return actor_loss, log_pis
+    
+
+    def _compute_policy_value(self, obs_pi, obs_q):
+
+        actions_pred , log_pis = self.actor_local.evaluate(obs_pi)
+
+        qs1 = self.critic1(obs_q, actions_pred)
+        qs2 = self.critic2(obs_q, actions_pred)
+
+        return qs1 - log_pis.detach(), qs2 - log_pis.detach()
+
+    def _compute_random_values(self, obs, actions, critic):
+        random_values = critic(obs, actions)
+        random_log_probs = math.log(0.5 ** self.action_size)
+
+        return random_values - random_log_probs
+
+    def learn(self, experience):
+        """Updates actor, critics and entropy_alpha parameters using given batch of experience tuples.
+        Q_targets = r + γ * (min_critic_target(next_state, actor_target(next_state)) - α *log_pi(next_action|next_state))
+        Critic_loss = MSE(Q, Q_target)
+        Actor_loss = α * log_pi(a|s) - Q(s,a)
+        where:
+            actor_target(state) -> action
+            critic_target(state, action) -> Q-value
+        Params
+        ======
+            experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples 
+            gamma (float): discount factor
         """
-        Compute CQL loss
+
+        states, actions, rewards, next_states, dones = experience 
+
+        # ----------------------------- update actor ----------------------------- #
+        current_alpha = copy.deepcopy(self.alpha)
+        actor_loss, log_pis = self._calc_policy_loss(states, current_alpha)
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
+
+        #compute alpha loss 
+        if self.auto_tune_alpha:
+            alpha_loss = - (self.log_alpha.exp() * (log_pis + self.target_entropy).detach()).mean()
+            self.alpha_optimizer.zero_grad()
+            alpha_loss.backward()
+            self.alpha_optimizer.step()
+            self.alpha = self.log_alpha.exp().detach()
+
+        # ----------------------------- update critics ----------------------------- #
+        with torch.no_grad():
+            next_action, new_log_pi = self.actor_local.evaluate(next_states)
+            Q_target1_next = self.critic1_target(next_states, next_action)
+            Q_target2_next = self.critic2_target(next_states, next_action)
+            Q_target_next = torch.min(Q_target1_next, Q_target2_next) - self.alpha * new_log_pi
+            Q_targets = rewards + (self.gamma * (1 - dones) * Q_target_next)
+
+        q1 = self.critic1(states, actions)
+        q2 = self.critic2(states, actions)
+
+        critic1_loss = F.mse_loss(q1, Q_targets)
+        critic2_loss = F.mse_loss(q2, Q_targets)
+
+        #CQL Addon 
+        random_actions = torch.FloatTensor(q1.shape[0] * 10, actions.shape[-1]).uniform_(-1, 1).to(self.device)
+        num_repeat = int(random_actions.shape[0] / states.shape[0])
+        temp_states = states.unsqueeze(1).repeat(1, num_repeat, 1).view(states.shape[0] * num_repeat, states.shape[1])
+        temp_next_states = next_states.unsqueeze(1).repeat(1, num_repeat, 1).view(next_states.shape[0] * num_repeat, next_states.shape[1])
         
-        Args:
-            states: Current states
-            actions: Current actions
-            next_states: Next states
-            rewards: Rewards
-            dones: Done flags
-            
-        Returns:
-            CQL loss and metrics dictionary
-        """
-        batch_size = states.shape[0]
+        current_pi_values1, current_pi_values2  = self._compute_policy_value(temp_states, temp_states)
+        next_pi_values1, next_pi_values2 = self._compute_policy_value(temp_next_states, temp_states)
         
-        # Get current Q-values
-        q1_pred = self.critic1(states, actions)
-        q2_pred = self.critic2(states, actions)
+        random_values1 = self._compute_random_values(temp_states, random_actions, self.critic1).reshape(states.shape[0], num_repeat, 1)
+        random_values2 = self._compute_random_values(temp_states, random_actions, self.critic2).reshape(states.shape[0], num_repeat, 1)
         
-        # Sample random actions
-        random_actions = torch.FloatTensor(
-            batch_size * self.num_random, self.action_size
-        ).uniform_(-1, 1).to(self.device)
+        current_pi_values1 = current_pi_values1.reshape(states.shape[0], num_repeat, 1)
+        current_pi_values2 = current_pi_values2.reshape(states.shape[0], num_repeat, 1)
+
+        next_pi_values1 = next_pi_values1.reshape(states.shape[0], num_repeat, 1)
+        next_pi_values2 = next_pi_values2.reshape(states.shape[0], num_repeat, 1)
         
-        # Expand states to match random actions
-        temp_states = states.unsqueeze(1).repeat(1, self.num_random, 1)
-        temp_states = temp_states.view(-1, states.shape[-1])
+        cat_q1 = torch.cat([random_values1, current_pi_values1, next_pi_values1], 1)
+        cat_q2 = torch.cat([random_values2, current_pi_values2, next_pi_values2], 1)
         
-        # Get Q-values for random actions
-        q1_rand = self.critic1(temp_states, random_actions)
-        q2_rand = self.critic2(temp_states, random_actions)
+        assert cat_q1.shape == (states.shape[0], 3 * num_repeat, 1), f"cat_q1 instead has shape: {cat_q1.shape}"
+        assert cat_q2.shape == (states.shape[0], 3 * num_repeat, 1), f"cat_q2 instead has shape: {cat_q2.shape}"
         
-        # Sample actions from current policy
-        policy_actions, log_probs = self.actor.evaluate(temp_states)
-        q1_curr = self.critic1(temp_states, policy_actions)
-        q2_curr = self.critic2(temp_states, policy_actions)
+
+        cql1_scaled_loss = ((torch.logsumexp(cat_q1 / self.temp, dim=1).mean() * self.cql_weight * self.temp) - q1.mean()) * self.cql_weight
+        cql2_scaled_loss = ((torch.logsumexp(cat_q2 / self.temp, dim=1).mean() * self.cql_weight * self.temp) - q2.mean()) * self.cql_weight
         
-        # Compute CQL loss
-        random_density = np.log(0.5 ** self.action_size)
-        cat_q1 = torch.cat([
-            q1_rand - random_density,
-            q1_curr - log_probs.detach()
-        ])
-        cat_q2 = torch.cat([
-            q2_rand - random_density,
-            q2_curr - log_probs.detach()
-        ])
-        
-        min_qf1_loss = torch.logsumexp(cat_q1 / self.cql_tau, dim=0) * self.cql_tau
-        min_qf2_loss = torch.logsumexp(cat_q2 / self.cql_tau, dim=0) * self.cql_tau
-        
-        # Compute final CQL loss
-        min_qf1_loss = min_qf1_loss.mean() - q1_pred.mean()
-        min_qf2_loss = min_qf2_loss.mean() - q2_pred.mean()
-        
+        cql_alpha_loss = torch.FloatTensor([0.0])
+        cql_alpha = torch.FloatTensor([0.0])
         if self.with_lagrange:
-            # Automatically adjust CQL weight using Lagrange multipliers
             cql_alpha = torch.clamp(self.log_cql_alpha.exp(), min=0.0, max=1000000.0)
-            cql_loss = cql_alpha * (min_qf1_loss - self.target_action_gap)
-            
-            self.cql_alpha_optimizer.zero_grad()
-            cql_alpha_loss = -(cql_loss.detach())
-            cql_alpha_loss.backward()
-            self.cql_alpha_optimizer.step()
-        else:
-            cql_loss = self.cql_weight * (min_qf1_loss + min_qf2_loss)
-            cql_alpha = self.cql_weight
-            cql_alpha_loss = 0
-        
-        return cql_loss, {
-            'cql_loss': cql_loss.item(),
-            'cql_q1_loss': min_qf1_loss.item(),
-            'cql_q2_loss': min_qf2_loss.item(),
-            'cql_alpha': cql_alpha.item() if self.with_lagrange else self.cql_weight,
-            'cql_alpha_loss': cql_alpha_loss.item() if self.with_lagrange else 0
-        }
-    
-    def update(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
-        """
-        Update network parameters
-        
-        Args:
-            batch: Dictionary containing 'observations', 'actions', 'rewards',
-                  'next_observations', 'terminals'
-            
-        Returns:
-            Dictionary containing various loss values and metrics
-        """
-        # Get standard SAC losses
-        metrics = super().update(batch)
-        
-        # Compute CQL loss
-        cql_loss, cql_metrics = self._compute_cql_loss(
-            batch['observations'].to(self.device),
-            batch['actions'].to(self.device),
-            batch['next_observations'].to(self.device),
-            batch['rewards'].to(self.device),
-            batch['terminals'].to(self.device)
-        )
-        
-        # Update critics with CQL loss
-        self.critic1_optimizer.zero_grad()
-        self.critic2_optimizer.zero_grad()
-        cql_loss.backward()
-        self.critic1_optimizer.step()
-        self.critic2_optimizer.step()
-        
-        # Update metrics
-        metrics.update(cql_metrics)
-        return metrics
-    
-    def save(self, path: str):
-        """
-        Save model
-        
-        Args:
-            path: Save path
-        """
-        checkpoint = super().save(path)
-        if self.with_lagrange:
-            checkpoint.update({
-                'log_cql_alpha': self.log_cql_alpha,
-                'cql_alpha_optimizer_state_dict': self.cql_alpha_optimizer.state_dict()
-            })
-        torch.save(checkpoint, path)
-    
-    def load(self, path: str):
-        """
-        Load model
-        
-        Args:
-            path: Load path
-        """
-        checkpoint = torch.load(path, weights_only=False)
-        super().load(path)
-        if self.with_lagrange:
-            self.log_cql_alpha = checkpoint['log_cql_alpha']
-            self.cql_alpha_optimizer.load_state_dict(checkpoint['cql_alpha_optimizer_state_dict'])
+            cql1_scaled_loss = cql_alpha * (cql1_scaled_loss - self.target_action_gap)
+            cql2_scaled_loss = cql_alpha * (cql2_scaled_loss - self.target_action_gap)
 
-if __name__ == "__main__":
-    # Test code
-    import gymnasium as gym
-    
-    # Create environment
-    env = gym.make('Pendulum-v1')
-    state_size = env.observation_space.shape[0]
-    action_size = env.action_space.shape[0]
-    
-    # Create agent
-    config = {
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-        'gamma': 0.99,
-        'tau': 0.005,
-        'learning_rate': 3e-4,
-        'hidden_size': 256,
-        'cql_alpha': 1.0,
-        'cql_tau': 10.0,
-        'with_lagrange': True,
-        'target_action_gap': 1.0
-    }
-    agent = CQL(state_size, action_size, config)
-    print("Agent created successfully!")
+            self.cql_alpha_optimizer.zero_grad()
+            cql_alpha_loss = (- cql1_scaled_loss - cql2_scaled_loss) * 0.5 
+            cql_alpha_loss.backward(retain_graph=True)
+            self.cql_alpha_optimizer.step()
+        
+        total_c1_loss = critic1_loss + cql1_scaled_loss
+        total_c2_loss = critic2_loss + cql2_scaled_loss
+        
+        
+        # Update critics
+        # critic 1
+        self.critic1_optimizer.zero_grad()
+        total_c1_loss.backward(retain_graph=True)
+        clip_grad_norm_(self.critic1.parameters(), self.clip_grad_param)
+        self.critic1_optimizer.step()
+        # critic 2
+        self.critic2_optimizer.zero_grad()
+        total_c2_loss.backward()
+        clip_grad_norm_(self.critic2.parameters(), self.clip_grad_param)
+        self.critic2_optimizer.step()
+
+        # ----------------------- update target networks ----------------------- #
+        self.soft_update(self.critic1, self.critic1_target)
+        self.soft_update(self.critic2, self.critic2_target)
+        
+        return actor_loss.item(), alpha_loss.item(), critic1_loss.item(), critic2_loss.item(), cql1_scaled_loss.item(), cql2_scaled_loss.item(), current_alpha, cql_alpha_loss.item(), cql_alpha.item()
+
+    def soft_update(self, local_model , target_model):
+        """Soft update model parameters.
+        θ_target = τ*θ_local + (1 - τ)*θ_target
+        Params
+        ======
+            local_model: PyTorch model (weights will be copied from)
+            target_model: PyTorch model (weights will be copied to)
+            tau (float): interpolation parameter 
+        """
+        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
+            target_param.data.copy_(self.tau*local_param.data + (1.0-self.tau)*target_param.data)
+
