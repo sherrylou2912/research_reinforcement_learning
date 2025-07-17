@@ -2,13 +2,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.nn.utils import clip_grad_norm_
+from .networks import Critic, Actor 
 import numpy as np
-from typing import Dict, Any, Optional, Union, Tuple
+import math 
+import copy
 
-from .sac import SAC
-from .networks import update_target
-
-class CQL(SAC):
+class CQLSAC(nn.Module):
     """Conservative Q-Learning (CQL) algorithm implementation"""
     
     def __init__(
@@ -25,20 +25,31 @@ class CQL(SAC):
             action_size: Dimension of action space
             config: Configuration dictionary containing hyperparameters
         """
-        super().__init__(state_size, action_size, config)
-        
+        super(CQLSAC).__init__()
+
+        # SAC Hyperparameter 
+        self.tau = config.get('tau', 5e-3)
+        self.hidden_size = config.get('hidden_size', 256)
+        self.learning_rate = config.get('learning_rate', 3e-4)
+        self.clip_grad_param = config.get('clip_grad_param', 1)
+
         # CQL specific parameters
-        self.cql_alpha = config.get('cql_alpha', 1.0)
-        self.cql_tau = config.get('cql_tau', 10.0)
-        self.cql_weight = config.get('cql_weight', 1.0)
-        self.num_random = config.get('num_random', 10)
+        self.temp = config.get('temp', 1.0)
         self.with_lagrange = config.get('with_lagrange', False)
-        self.target_action_gap = config.get('target_action_gap', 1.0)
-        
+        self.cql_weight = config.get('cql_weight', 1.0)
+        self.target_action_gap = config.get('target_action_gap', 10)
+        self.cql_alpha = config.get('cql_alpha', 0.2)
+
         if self.with_lagrange:
             self.log_cql_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-            self.cql_alpha_optimizer = torch.optim.Adam([self.log_cql_alpha], lr=self.learning_rate)
-    
+            self.cql_alpha_optimizer = torch.optim.Adam(params = [self.log_cql_alpha], lr=self.learning_rate)
+
+        #rank evaluate parameter 
+        self.num_random = config.get('num_random', 10)
+
+        #Actor Network 
+        self.actor_local = Actor
+
     def _compute_cql_loss(
         self,
         states: torch.Tensor,

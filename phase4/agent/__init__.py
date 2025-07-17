@@ -3,7 +3,7 @@ Agent module for reinforcement learning algorithms.
 """
 
 from .sac import SAC
-from .cql import CQL
+from .cqlsac import CQL
 from .svrl import SVRL
 from .networks import Actor, Critic
 
