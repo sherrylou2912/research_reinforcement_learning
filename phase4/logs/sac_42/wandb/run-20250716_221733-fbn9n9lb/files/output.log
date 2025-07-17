@@ -1,0 +1,83 @@
+Logger initialized
+
+Optimizing CUDA performance...
+CUDA optimization settings applied
+
+Starting training loop...
+Total episodes: 200
+Eval frequency: every 1 episodes
+Log frequency: every 100 steps
+Steps per epoch: 488
+Total expected steps: 97600
+Episode 1/200 [400/488] Steps: 400/97600 (36.9 steps/s) Loss: 0.647
+Episode 1 completed in 12.58s
+
+Evaluating at episode 1...
+Evaluation results - Mean return: -97.52 ± 29.86
+New best model saved to models/sac_HalfCheetah-v4_seed42_best.pt
+Episode 2/200 [412/488] Steps: 900/97600 (39.5 steps/s) Loss: 0.490
+Episode 2 completed in 12.99s
+
+Evaluating at episode 2...
+Evaluation results - Mean return: -147.45 ± 18.34
+Episode 3/200 [424/488] Steps: 1400/97600 (39.3 steps/s) Loss: 0.495
+Episode 3 completed in 12.31s
+
+Evaluating at episode 3...
+Evaluation results - Mean return: -152.03 ± 19.66
+Episode 4/200 [436/488] Steps: 1900/97600 (38.8 steps/s) Loss: 0.446
+Episode 4 completed in 13.11s
+
+Evaluating at episode 4...
+Evaluation results - Mean return: -192.96 ± 34.53
+Episode 5/200 [448/488] Steps: 2400/97600 (37.3 steps/s) Loss: 0.437
+Episode 5 completed in 12.71s
+
+Evaluating at episode 5...
+Evaluation results - Mean return: -158.74 ± 27.54
+Episode 6/200 [460/488] Steps: 2900/97600 (33.6 steps/s) Loss: 0.415
+Episode 6 completed in 13.57s
+
+Evaluating at episode 6...
+Evaluation results - Mean return: -145.77 ± 8.70
+Episode 7/200 [472/488] Steps: 3400/97600 (36.6 steps/s) Loss: 0.453
+Episode 7 completed in 13.52s
+
+Evaluating at episode 7...
+Evaluation results - Mean return: -252.74 ± 15.64
+Episode 8/200 [484/488] Steps: 3900/97600 (38.1 steps/s) Loss: 0.448
+Episode 8 completed in 13.13s
+
+Evaluating at episode 8...
+Evaluation results - Mean return: -192.44 ± 3.84
+Episode 9/200 [396/488] Steps: 4300/97600 (37.8 steps/s) Loss: 0.436
+Episode 9 completed in 13.26s
+
+Evaluating at episode 9...
+Evaluation results - Mean return: -237.25 ± 15.54
+Episode 10/200 [408/488] Steps: 4800/97600 (36.1 steps/s) Loss: 0.447
+Episode 10 completed in 13.20s
+
+Evaluating at episode 10...
+Evaluation results - Mean return: -290.01 ± 28.30
+Episode 11/200 [420/488] Steps: 5300/97600 (37.6 steps/s) Loss: 0.455
+Episode 11 completed in 13.04s
+
+Evaluating at episode 11...
+Evaluation results - Mean return: -269.74 ± 23.76
+Episode 12/200 [432/488] Steps: 5800/97600 (37.3 steps/s) Loss: 0.421
+Episode 12 completed in 13.32s
+
+Evaluating at episode 12...
+Evaluation results - Mean return: -275.51 ± 36.15
+Episode 13/200 [444/488] Steps: 6300/97600 (37.2 steps/s) Loss: 0.465
+Episode 13 completed in 13.35s
+
+Evaluating at episode 13...
+Evaluation results - Mean return: -275.87 ± 17.36
+Episode 14/200 [456/488] Steps: 6800/97600 (38.0 steps/s) Loss: 0.466
+Episode 14 completed in 13.15s
+
+Evaluating at episode 14...
+Evaluation results - Mean return: -296.91 ± 13.73
+Episode 15/200 [368/488] Steps: 7200/97600 (38.3 steps/s) Loss: 0.446

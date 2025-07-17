@@ -1,30 +1,49 @@
+
 # ===================== SAC Configuration =====================
 # Soft Actor-Critic algorithm specific settings
-# Inherits base settings and adds SAC-specific parameters
+# Independent configuration without inheritance
 
-# Import base configuration
-defaults:
-  - base
+# ===================== Environment Configuration =====================
+env: "HalfCheetah-v4"  # Gymnasium environment name
+seed: 42               # Random seed for reproducibility
+
+# ===================== Network Architecture =====================
+hidden_size: 256       # Hidden layer size for Actor and Critic networks
+activation: "relu"     # Activation function: "relu", "tanh", "elu", "gelu"
+
+# ===================== Training Parameters =====================
+episodes: 200          # Total number of training episodes
+batch_size: 2048       # Mini-batch size for gradient updates
+learning_rate: 0.0003  # Learning rate for all optimizers
+gamma: 0.99            # Discount factor for future rewards [0,1]
+tau: 0.005             # Target network soft update coefficient [0,1]
 
 # ===================== SAC-Specific Parameters =====================
 alpha: 0.2             # SAC temperature parameter for entropy regularization
 target_entropy: null   # Target entropy (-dim(action_space) if null)
-auto_tune_alpha: false  # Enable automatic temperature tuning
-
-# ===================== Override Base Settings =====================
-# Customize base parameters for SAC
-episodes: 200        # More episodes for SAC convergence
-batch_size: 2048  # Larger batch size for stable gradients
-project_name: "SAC Offline RL"
-group: "sac-experiments"
-name: "sac_default"
-use_wandb: true
+auto_tune_alpha: false # Enable automatic temperature tuning
 
 # ===================== Advanced SAC Settings =====================
-# Fine-tuning parameters for expert users
 critic_lr: 0.0003      # Critic learning rate (can differ from actor)
 actor_lr: 0.0003       # Actor learning rate
 alpha_lr: 0.0003       # Alpha (temperature) learning rate
 reward_scale: 1.0      # Reward scaling factor
 update_after: 1000     # Start updates after N steps
-update_every: 50       # Update frequency 
+update_every: 50       # Update frequency
+
+# ===================== Evaluation Settings =====================
+eval_episodes: 3       # Number of episodes for policy evaluation
+eval_every: 1          # Evaluate policy every N episodes
+log_every: 100         # Log training metrics every N steps
+
+# ===================== Logging Configuration =====================
+use_wandb: true        # Enable Weights & Biases logging
+project_name: "SAC Offline RL"  # W&B project name
+group: "sac-experiments"        # W&B experiment group
+name: "sac_default"             # Specific experiment identifier
+save_best: true        # Save best performing model
+
+# ===================== Hardware Settings =====================
+device: "cuda"         # Compute device: "cuda" (GPU) or "cpu"
+num_workers: 4         # Data loader worker processes
+pin_memory: true       # Pin memory for faster GPU transfer

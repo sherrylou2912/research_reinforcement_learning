@@ -10,7 +10,7 @@ import numpy as np
 import time # Added for timing
 
 from agent.sac import SAC
-from agent.cql import CQL
+from agent.cqlsac import CQLSAC
 from agent.svrl import SVRL
 from data.minari_loader import create_minari_dataloader  # 用minari数据加载
 from utils.logger import Logger
@@ -46,8 +46,8 @@ def create_agent(agent_type: str, env, config: Dict[str, Any]):
     
     if agent_type == 'sac':
         return SAC(state_size, action_size, config)
-    elif agent_type == 'cql':
-        return CQL(state_size, action_size, config)
+    elif agent_type == 'cqlsac':
+        return CQLSAC(state_size, action_size, config)
     elif agent_type == 'svrl':
         return SVRL(state_size, action_size, config)
     else:
@@ -86,8 +86,8 @@ def train_once(args, config, seed):
     print(f"Creating {args.agent} agent...")
     if args.agent == 'sac':
         agent = SAC(state_size, action_size, config)
-    elif args.agent == 'cql':
-        agent = CQL(state_size, action_size, config)
+    elif args.agent == 'cqlsac':
+        agent = CQLSAC(state_size, action_size, config)
     else:
         agent = SVRL(state_size, action_size, config)
 
@@ -211,7 +211,7 @@ def main():
     # 解析参数
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, required=True, help='Path to config file')
-    parser.add_argument('--agent', type=str, required=True, choices=['sac', 'cql', 'svrl'])
+    parser.add_argument('--agent', type=str, required=True, choices=['sac', 'cqlsac', 'svrl'])
     parser.add_argument('--dataset', type=str, required=True, help='Minari dataset name')
     parser.add_argument('--normalize_states', action='store_true', help='Whether to normalize states')
     parser.add_argument('--normalize_rewards', action='store_true', help='Whether to normalize rewards')

@@ -14,14 +14,13 @@ from .sac import SAC
 from .networks import update_target
 
 try:
-    from .cql import CQL
-    from .networks import update_target
+    from .cqlsac import CQLSAC
+    
 except ImportError:
-    from cql import CQL
-    from networks import update_target
+    from cqlsac import CQLSAC
 
 
-class SVRL(CQL):
+class SVRL(CQLSAC):
     """Structured Value-based Representation Learning (SVRL) algorithm implementation"""
     
     def __init__(

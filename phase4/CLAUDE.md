@@ -25,7 +25,7 @@ conda activate offline-rl
 python train.py --config config/sac.yaml --agent sac --dataset 'mujoco/halfcheetah/medium-v0' --normalize_states --normalize_rewards
 
 # Multiple seeds
-python train.py --config config/cql.yaml --agent cql --dataset 'mujoco/halfcheetah/medium-v0' --normalize_states --normalize_rewards
+python train.py --config config/cql.yaml --agent cqlsac --dataset 'mujoco/halfcheetah/medium-v0' --normalize_states --normalize_rewards
 
 # Multiple trials
 python train.py --config config/svrl.yaml --agent svrl --dataset "D4RL/hopper/expert-v2" --num_trials 5

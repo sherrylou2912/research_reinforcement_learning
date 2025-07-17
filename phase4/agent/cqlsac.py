@@ -26,24 +26,25 @@ class CQLSAC(nn.Module):
             action_size: Dimension of action space
             config: Configuration dictionary containing hyperparameters
         """
-        super(CQLSAC).__init__()
+        super(CQLSAC,self).__init__()
 
         self.device = config.get('device', 'cuda')
         # SAC Hyperparameter 
-        self.tau = config.get('tau', 5e-3)
-        self.hidden_size = config.get('hidden_size', 256)
-        self.learning_rate = config.get('learning_rate', 3e-4)
-        self.clip_grad_param = config.get('clip_grad_param', 1)
-        self.target_entropy = config.get('target_entropy', -action_size)
-        self.auto_tune_alpha = config.get('auto_tune_alpha', True)
-        self.gamma = config.get('gamma', 0.99)
+        self.tau = float(config.get('tau', 5e-3))
+        self.hidden_size = int(config.get('hidden_size', 256))
+        self.learning_rate = float(config.get('learning_rate', 3e-4))
+        self.clip_grad_param = float(config.get('clip_grad_param', 1))
+        self.target_entropy = float(config.get('target_entropy', -action_size))
+        self.gamma = float(config.get('gamma', 0.99))
+        
+        # Actor parameters
+        self.log_std_min = float(config.get('log_std_min', -20))
+        self.log_std_max = float(config.get('log_std_max', 20))
 
-        if self.auto_tune_alpha:
-            self.log_alpha = torch.tensor([0.0], requires_grad = True, device=self.device)
-            self.alpha = self.log_alpha.exp().detach()
-            self.alpha_optimizer = optim.Adam(params = [self.log_alpha], lr = self.learning_rate)
-        else:
-            self.alpha = config.get('alpha', 0.2)
+        # Alpha is always tunable
+        self.log_alpha = torch.tensor([0.0], requires_grad = True, device=self.device)
+        self.alpha = self.log_alpha.exp().detach()
+        self.alpha_optimizer = optim.Adam(params = [self.log_alpha], lr = self.learning_rate)
 
         # CQL specific parameters
         self.temp = config.get('temp', 1.0)
@@ -58,21 +59,32 @@ class CQLSAC(nn.Module):
 
         #rank evaluate parameter 
         self.num_random = config.get('num_random', 10)
-
+        
+        # Store action size for later use
+        self.action_size = action_size
+        
+        # Initialize networks after all parameters are set
+        self._init_networks(state_size, action_size)
+        
+    def _init_networks(self, state_size, action_size):
+        """Initialize all neural networks and optimizers"""
         #Actor Network 
-        self.log_std_min = config.get('log_std_min', -20)
-        self.log_std_max = config.get('log_std_max', 20)
         self.actor_local = Actor(state_size, action_size, self.hidden_size, log_std_max= self.log_std_max, log_std_min = self.log_std_min, device=self.device)
+        self.actor_local.to(self.device)
         self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=self.learning_rate)
 
         #Critic Network
         self.critic1 = Critic(state_size, action_size, self.hidden_size, self.device, 1229)
+        self.critic1.to(self.device)
         self.critic2 = Critic(state_size, action_size, self.hidden_size, self.device, 1101)
+        self.critic2.to(self.device)
 
         assert self.critic1.parameters() != self.critic2.parameters()
 
         self.critic1_target = Critic(state_size, action_size, self.hidden_size, self.device, 1229)
+        self.critic1_target.to(self.device)
         self.critic2_target = Critic(state_size, action_size, self.hidden_size, self.device, 1101)
+        self.critic2_target.to(self.device)
 
         self.critic1_target.load_state_dict(self.critic1.state_dict())
         self.critic2_target.load_state_dict(self.critic2.state_dict())
@@ -120,6 +132,32 @@ class CQLSAC(nn.Module):
 
         return random_values - random_log_probs
 
+    def update(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
+        """Update agent using batch of experience - interface for train.py"""
+        # Convert batch dict to tuple format expected by learn method and move to device
+        states = batch['observations'].to(self.device)
+        actions = batch['actions'].to(self.device)
+        rewards = batch['rewards'].to(self.device)
+        next_states = batch['next_observations'].to(self.device)
+        dones = batch['terminals'].to(self.device)
+        
+        experience = (states, actions, rewards, next_states, dones)
+        
+        # Call learn method and return metrics dict
+        actor_loss, alpha_loss, critic1_loss, critic2_loss, cql1_loss, cql2_loss, current_alpha, cql_alpha_loss, cql_alpha = self.learn(experience)
+        
+        return {
+            'actor_loss': actor_loss,
+            'alpha_loss': alpha_loss,
+            'critic1_loss': critic1_loss,
+            'critic2_loss': critic2_loss,
+            'cql1_loss': cql1_loss,
+            'cql2_loss': cql2_loss,
+            'alpha': self.log_alpha.exp().item(),
+            'cql_alpha_loss': cql_alpha_loss,
+            'cql_alpha': cql_alpha
+        }
+
     def learn(self, experience):
         """Updates actor, critics and entropy_alpha parameters using given batch of experience tuples.
         Q_targets = r + γ * (min_critic_target(next_state, actor_target(next_state)) - α *log_pi(next_action|next_state))
@@ -137,19 +175,18 @@ class CQLSAC(nn.Module):
         states, actions, rewards, next_states, dones = experience 
 
         # ----------------------------- update actor ----------------------------- #
-        current_alpha = copy.deepcopy(self.alpha)
-        actor_loss, log_pis = self._calc_policy_loss(states, current_alpha)
+        actor_loss, log_pis = self._calc_policy_loss(states, self.alpha)
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
 
         #compute alpha loss 
-        if self.auto_tune_alpha:
-            alpha_loss = - (self.log_alpha.exp() * (log_pis + self.target_entropy).detach()).mean()
-            self.alpha_optimizer.zero_grad()
-            alpha_loss.backward()
-            self.alpha_optimizer.step()
-            self.alpha = self.log_alpha.exp().detach()
+        alpha_loss = - (self.log_alpha.exp() * (log_pis + self.target_entropy).detach()).mean()
+        self.alpha_optimizer.zero_grad()
+        alpha_loss.backward()
+        self.alpha_optimizer.step()
+        self.alpha = self.log_alpha.exp().detach()
+
 
         # ----------------------------- update critics ----------------------------- #
         with torch.no_grad():
@@ -157,7 +194,7 @@ class CQLSAC(nn.Module):
             Q_target1_next = self.critic1_target(next_states, next_action)
             Q_target2_next = self.critic2_target(next_states, next_action)
             Q_target_next = torch.min(Q_target1_next, Q_target2_next) - self.alpha * new_log_pi
-            Q_targets = rewards + (self.gamma * (1 - dones) * Q_target_next)
+            Q_targets = rewards.unsqueeze(-1) + (self.gamma * (1 - dones).unsqueeze(-1) * Q_target_next)
 
         q1 = self.critic1(states, actions)
         q2 = self.critic2(states, actions)
@@ -194,7 +231,6 @@ class CQLSAC(nn.Module):
         cql2_scaled_loss = ((torch.logsumexp(cat_q2 / self.temp, dim=1).mean() * self.cql_weight * self.temp) - q2.mean()) * self.cql_weight
         
         cql_alpha_loss = torch.FloatTensor([0.0])
-        cql_alpha = torch.FloatTensor([0.0])
         if self.with_lagrange:
             cql_alpha = torch.clamp(self.log_cql_alpha.exp(), min=0.0, max=1000000.0)
             cql1_scaled_loss = cql_alpha * (cql1_scaled_loss - self.target_action_gap)
@@ -204,6 +240,9 @@ class CQLSAC(nn.Module):
             cql_alpha_loss = (- cql1_scaled_loss - cql2_scaled_loss) * 0.5 
             cql_alpha_loss.backward(retain_graph=True)
             self.cql_alpha_optimizer.step()
+        else:
+            # Use fixed CQL alpha when not using Lagrange multiplier
+            cql_alpha = torch.FloatTensor([self.cql_alpha])
         
         total_c1_loss = critic1_loss + cql1_scaled_loss
         total_c2_loss = critic2_loss + cql2_scaled_loss
@@ -225,7 +264,7 @@ class CQLSAC(nn.Module):
         self.soft_update(self.critic1, self.critic1_target)
         self.soft_update(self.critic2, self.critic2_target)
         
-        return actor_loss.item(), alpha_loss.item(), critic1_loss.item(), critic2_loss.item(), cql1_scaled_loss.item(), cql2_scaled_loss.item(), current_alpha, cql_alpha_loss.item(), cql_alpha.item()
+        return actor_loss.item(), alpha_loss.item(), critic1_loss.item(), critic2_loss.item(), cql1_scaled_loss.item(), cql2_scaled_loss.item(), self.log_alpha.exp().item(), cql_alpha_loss.item(), cql_alpha.item()
 
     def soft_update(self, local_model , target_model):
         """Soft update model parameters.
@@ -238,4 +277,50 @@ class CQLSAC(nn.Module):
         """
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(self.tau*local_param.data + (1.0-self.tau)*target_param.data)
+
+    def set_normalization_stats(self, stats: Dict[str, np.ndarray]):
+        """Set normalization statistics for states and rewards."""
+        self.normalization_stats = stats
+        if hasattr(self.actor_local, 'set_normalization_stats'):
+            self.actor_local.set_normalization_stats(stats)
+
+    def save(self, path: str):
+        """Save agent state to file."""
+        torch.save({
+            'actor_state_dict': self.actor_local.state_dict(),
+            'critic1_state_dict': self.critic1.state_dict(),
+            'critic2_state_dict': self.critic2.state_dict(),
+            'critic1_target_state_dict': self.critic1_target.state_dict(),
+            'critic2_target_state_dict': self.critic2_target.state_dict(),
+            'actor_optimizer_state_dict': self.actor_optimizer.state_dict(),
+            'critic1_optimizer_state_dict': self.critic1_optimizer.state_dict(),
+            'critic2_optimizer_state_dict': self.critic2_optimizer.state_dict(),
+            'log_alpha': self.log_alpha,
+            'alpha_optimizer_state_dict': self.alpha_optimizer.state_dict(),
+            'log_cql_alpha': self.log_cql_alpha if self.with_lagrange else None,
+            'cql_alpha_optimizer_state_dict': self.cql_alpha_optimizer.state_dict() if self.with_lagrange else None,
+        }, path)
+
+    def load(self, path: str):
+        """Load agent state from file."""
+        checkpoint = torch.load(path, map_location=self.device)
+        
+        self.actor_local.load_state_dict(checkpoint['actor_state_dict'])
+        self.critic1.load_state_dict(checkpoint['critic1_state_dict'])
+        self.critic2.load_state_dict(checkpoint['critic2_state_dict'])
+        self.critic1_target.load_state_dict(checkpoint['critic1_target_state_dict'])
+        self.critic2_target.load_state_dict(checkpoint['critic2_target_state_dict'])
+        
+        self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
+        self.critic1_optimizer.load_state_dict(checkpoint['critic1_optimizer_state_dict'])
+        self.critic2_optimizer.load_state_dict(checkpoint['critic2_optimizer_state_dict'])
+        
+        if checkpoint['log_alpha'] is not None:
+            self.log_alpha.data = checkpoint['log_alpha'].data
+            self.alpha_optimizer.load_state_dict(checkpoint['alpha_optimizer_state_dict'])
+            self.alpha = self.log_alpha.exp().detach()
+            
+        if self.with_lagrange and checkpoint['log_cql_alpha'] is not None:
+            self.log_cql_alpha.data = checkpoint['log_cql_alpha'].data
+            self.cql_alpha_optimizer.load_state_dict(checkpoint['cql_alpha_optimizer_state_dict'])
 

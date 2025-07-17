@@ -1,0 +1,49 @@
+{
+  "os":  "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "python":  "CPython 3.13.5",
+  "startedAt":  "2025-07-17T03:17:33.561813Z",
+  "args":  [
+    "--config",
+    "config/sac.yaml",
+    "--agent",
+    "sac",
+    "--dataset",
+    "mujoco/halfcheetah/medium-v0",
+    "--normalize_states",
+    "--normalize_rewards"
+  ],
+  "program":  "/mnt/e/OMSCS/sherryl/research_reinforcement_learning/phase4/train.py",
+  "codePath":  "phase4/train.py",
+  "codePathLocal":  "train.py",
+  "git":  {
+    "remote":  "https://github.com/sherrylou2912/research_reinforcement_learning.git",
+    "commit":  "d8c748457469b0d25f154dc14420c4b276a32feb"
+  },
+  "email":  "xylou@uchicago.edu",
+  "root":  "logs/sac_42",
+  "host":  "DESKTOP-VQVN7I0",
+  "executable":  "/home/hhx/miniconda3/envs/offline-rl/bin/python",
+  "cpu_count":  10,
+  "cpu_count_logical":  20,
+  "gpu":  "NVIDIA GeForce RTX 4090",
+  "gpu_count":  1,
+  "disk":  {
+    "/":  {
+      "total":  "1081101176832",
+      "used":  "30058962944"
+    }
+  },
+  "memory":  {
+    "total":  "16633729024"
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA GeForce RTX 4090",
+      "memoryTotal":  "25757220864",
+      "architecture":  "Ada",
+      "uuid":  "GPU-a058a89f-b939-9c0b-4d0f-68704ff05d5d"
+    }
+  ],
+  "cudaVersion":  "12.9",
+  "writerId":  "oa5t3byo071icrxzpeuawjnzorh2xtd4"
+}

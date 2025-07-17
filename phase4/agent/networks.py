@@ -37,7 +37,7 @@ class Actor(nn.Module):
         
     def forward(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(state))
+        x = F.relu(self.fc2(x))
         mu = self.mu(x)
 
         log_std = self.log_std_linear(x)
@@ -100,3 +100,16 @@ class Critic(nn.Module):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         return self.fc3(x)
+
+
+def update_target(target_net: nn.Module, local_net: nn.Module, tau: float):
+    """Soft update model parameters.
+    θ_target = τ*θ_local + (1 - τ)*θ_target
+    
+    Args:
+        target_net: Target network to update
+        local_net: Local network to copy from
+        tau: Interpolation parameter (usually small, e.g. 0.005)
+    """
+    for target_param, local_param in zip(target_net.parameters(), local_net.parameters()):
+        target_param.data.copy_(tau * local_param.data + (1.0 - tau) * target_param.data)

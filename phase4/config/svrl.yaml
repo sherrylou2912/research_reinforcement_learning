@@ -1,10 +1,37 @@
 # ===================== SVRL Configuration =====================
 # Structured Value-based Representation Learning
-# Combines CQL with low-rank matrix factorization
+# Independent configuration without inheritance
 
-# Import CQL configuration as base
-defaults:
-  - cql
+# ===================== Environment Configuration =====================
+env: "HalfCheetah-v4"  # Gymnasium environment name
+seed: 42               # Random seed for reproducibility
+
+# ===================== Network Architecture =====================
+hidden_size: 256       # Hidden layer size for Actor and Critic networks
+activation: "relu"     # Activation function: "relu", "tanh", "elu", "gelu"
+
+# ===================== Training Parameters =====================
+episodes: 200          # Total number of training episodes
+batch_size: 256        # Mini-batch size for gradient updates
+learning_rate: 3e-4    # Learning rate for all optimizers
+gamma: 0.99            # Discount factor for future rewards [0,1]
+tau: 5e-3              # Target network soft update coefficient [0,1]
+clip_grad_param: 1     # Gradient clipping parameter
+
+# ===================== CQL Base Parameters =====================
+cql_alpha: 0.2         # CQL regularization coefficient
+temp: 1.0              # CQL temperature parameter
+with_lagrange: false   # Enable Lagrange multiplier for automatic CQL tuning
+target_action_gap: 10  # Target conservative gap when using Lagrange
+cql_weight: 1.0        # Weight for CQL loss
+num_random: 10         # Number of random actions for CQL
+
+# ===================== SAC Parameters =====================
+alpha: 0.2             # SAC temperature parameter
+auto_tune_alpha: true  # Enable automatic temperature tuning
+target_entropy: null   # Will be set to -action_size in agent
+log_std_min: -20       # Minimum log std for actor
+log_std_max: 20        # Maximum log std for actor
 
 # ===================== SVRL-Specific Parameters =====================
 rank: 10               # Rank for low-rank matrix factorization
@@ -18,15 +45,25 @@ soft_impute_iters: 100      # Iterations for soft imputation algorithm
 soft_impute_threshold: 1e-4 # Convergence threshold for soft imputation
 use_soft_impute: true       # Enable soft imputation for matrix completion
 
-# ===================== Override Settings for SVRL =====================
-project_name: "SVRL Offline RL"
-group: "svrl-experiments"
-name: "svrl_default"
-batch_size: 256        # Moderate batch size for structured learning
-learning_rate: 3e-4    # Slightly higher LR for structured components
-
 # ===================== Advanced SVRL Settings =====================
 orthogonal_init: true  # Initialize U,V matrices with orthogonal initialization
 grad_clip_norm: 1.0    # Gradient clipping for stability
 struct_update_freq: 1  # Update structured components every N steps
 use_target_struct: true # Use target networks for structured components
+
+# ===================== Evaluation Settings =====================
+eval_episodes: 3       # Number of episodes for policy evaluation
+eval_every: 1          # Evaluate policy every N episodes
+log_every: 100         # Log training metrics every N steps
+
+# ===================== Logging Configuration =====================
+use_wandb: false       # Enable Weights & Biases logging
+project_name: "SVRL Offline RL"  # W&B project name
+group: "svrl-experiments"        # W&B experiment group
+name: "svrl_default"             # Specific experiment identifier
+save_best: true        # Save best performing model
+
+# ===================== Hardware Settings =====================
+device: "cuda"         # Compute device: "cuda" (GPU) or "cpu"
+num_workers: 4         # Data loader worker processes
+pin_memory: true       # Pin memory for faster GPU transfer
