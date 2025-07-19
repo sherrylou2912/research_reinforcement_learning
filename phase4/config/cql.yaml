@@ -1,14 +1,5 @@
 # ===================== CQL Configuration =====================
 # Conservative Q-Learning for offline reinforcement learning
-# Independent configuration without inheritance
-
-# ===================== Environment Configuration =====================
-env: "HalfCheetah-v5" # Gymnasium environment name
-seed: 42               # Random seed for reproducibility
-
-# ===================== Network Architecture =====================
-hidden_size: 256       # Hidden layer size for Actor and Critic networks
-activation: "relu"     # Activation function: "relu", "tanh", "elu", "gelu"
 
 # ===================== Training Parameters =====================
 episodes: 200          # Total number of training episodes
@@ -17,6 +8,9 @@ learning_rate: 3e-4    # Learning rate for all optimizers
 gamma: 0.99            # Discount factor for future rewards [0,1]
 tau: 5e-3              # Target network soft update coefficient [0,1]
 clip_grad_param: 1     # Gradient clipping parameter
+
+# ===================== Network Architecture =====================
+hidden_size: 256       # Hidden layer size for Actor and Critic networks
 
 # ===================== CQL-Specific Parameters =====================
 cql_alpha: 0.2         # CQL regularization coefficient
@@ -29,20 +23,18 @@ num_random: 10         # Number of random actions for CQL
 # ===================== SAC Parameters =====================
 log_std_min: -20       # Minimum log std for actor
 log_std_max: 20        # Maximum log std for actor
+target_entropy: -1     # Target entropy for SAC (set automatically based on action_size in code)
 
 # ===================== Evaluation Settings =====================
-eval_episodes: 3       # Number of episodes for policy evaluation
-eval_every: 1          # Evaluate policy every N episodes
+eval_episodes: 5       # Number of episodes for policy evaluation
+eval_every: 10         # Evaluate policy every N episodes
 log_every: 100         # Log training metrics every N steps
 
 # ===================== Logging Configuration =====================
-use_wandb: true   # Enable Weights & Biases logging
-project_name: "CQL Offline RL"  # W&B project name
-group: "cql-experiments"        # W&B experiment group
-name: "cql_default"             # Specific experiment identifier
+use_wandb: true        # Enable Weights & Biases logging
+log_video: false       # Enable video logging (every 10 episodes)
 save_best: true        # Save best performing model
+save_every: 50         # Save checkpoint every N episodes
 
 # ===================== Hardware Settings =====================
 device: "cuda"         # Compute device: "cuda" (GPU) or "cpu"
-num_workers: 4         # Data loader worker processes
-pin_memory: true       # Pin memory for faster GPU transfer

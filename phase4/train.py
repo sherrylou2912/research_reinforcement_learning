@@ -8,270 +8,199 @@ import argparse
 from typing import Dict, Any
 import numpy as np
 import time # Added for timing
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
+from collections import deque
+from torch.optim.lr_scheduler import CosineAnnelingWarmRestarts
+import random
+import wandb
+import glob
 
 from agent.sac import SAC
 from agent.cqlsac import CQLSAC
 from agent.svrl import SVRL
-from data.minari_loader import create_minari_dataloader  # 用minari数据加载
+from data.minari_loader import MinariDataset  # 用minari数据加载
 from utils.logger import Logger
 from utils.eval_metrics import evaluate_policy
+from utils.rank_utils import log_approximate_rank
 
-def load_config(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file with inheritance support."""
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
+class Trainer:
+    def __init__(self, dataset_name, agent_type, config_path):
+        self.dataset_name = dataset_name
+        self.dataset = MinariDataset(dataset_name)
+        self.state_dim = self.dataset.state_dim
+        self.action_dim = self.dataset.action_dim
+        self.agent_type = agent_type
+        self.config = self.load_config(config_path)
+
+    def load_config(self, config_path: str):
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        return config 
     
-    # Handle inheritance via 'defaults' key
-    if 'defaults' in config:
-        base_configs = config.pop('defaults')
-        merged_config = {}
+    def create_agent(self):
+        if self.agent_type == 'sac':
+            return SAC(self.state_dim, self.action_dim, self.config)
+        elif self.agent_type == 'cqlsac':
+            return CQLSAC(self.state_dim, self.action_dim, self.config)
+        elif self.agent_type == 'svrl':
+            return SVRL(self.state_dim, self.action_dim, self.config)
+        else: 
+            raise ValueError(f"Unknown agent type: {self.agent_type}")
         
-        # Load base configs in order
-        for base_name in base_configs:
-            base_path = os.path.join(os.path.dirname(config_path), f"{base_name}.yaml")
-            if os.path.exists(base_path):
-                base_config = load_config(base_path)  # Recursive loading
-                merged_config.update(base_config)
+    def evaluate(self, env, policy):
+        reward_batch = []
+        eval_runs = self.config.get('eval_episodes', 5)
+        for i in range(eval_runs):
+            state, _ = env.reset()
+            rewards = 0
+            step = 0
+            max_steps = 1000  # Add max steps to prevent infinite loops
+            while step < max_steps: 
+                action = policy.get_action(state, eval = True)
+                state, reward, done, truncated, _ = env.step(action)
+                rewards += reward
+                step += 1
+                if done or truncated:
+                    break
+            reward_batch.append(rewards)
+        return np.mean(reward_batch), np.std(reward_batch)
         
-        # Override with current config
-        merged_config.update(config)
-        config = merged_config
-    
-    return config
+    def train_once(self, seed):
+        np.random.seed(seed)
+        random.seed(seed)
+        torch.manual_seed(seed)
 
-def create_agent(agent_type: str, env, config: Dict[str, Any]):
-    """Create agent based on type."""
-    state_size = env.observation_space.shape[0]
-    action_size = env.action_space.shape[0]
-    
-    if agent_type == 'sac':
-        return SAC(state_size, action_size, config)
-    elif agent_type == 'cqlsac':
-        return CQLSAC(state_size, action_size, config)
-    elif agent_type == 'svrl':
-        return SVRL(state_size, action_size, config)
-    else:
-        raise ValueError(f"Unknown agent type: {agent_type}")
-
-def train_once(args, config, seed):
-    """运行单次完整训练"""
-    print(f"\nInitializing training with seed {seed}...")
-    
-    # 设置随机种子
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    
-    # 创建数据加载器
-    print("Loading dataset...")
-    data_loader, normalization_stats = create_minari_dataloader(
-        dataset_name=args.dataset,
-        batch_size=config['batch_size'],
-        normalize_states=args.normalize_states,
-        normalize_rewards=args.normalize_rewards,
-        device=config['device']
+        self.dataloader = DataLoader(
+            self.dataset,
+            batch_size = float(self.config.get('batch_size', 1024)),
+            sampler = WeightedRandomSampler(
+            self.dataset.priorities,
+            num_samples = len(self.dataset),
+            replacement = True
+        ),
+        collate_fn = lambda b:{
+            'indices': torch.LongTensor([x[0] for x in b]),
+            'state': torch.stack([x[1] for x in b]),
+            'actions': torch.stack([x[2] for x in b]),
+            'next_states' : torch.stack([x[3] for x in b]),
+            'rewards': torch.stack([x[4] for x in b]),
+            'dones': torch.stack([x[5] for x in b])
+        },
+        num_workers = 4
     )
-    print(f"Dataset loaded with batch size {config['batch_size']}")
-    
-    # 创建环境和智能体
-    print("Creating environment...")
-    env = gym.make(config['env'])
-    eval_env = gym.make(config['env'])
-
-    # 获取维度
-    state_size = env.observation_space.shape[0]
-    action_size = env.action_space.shape[0]
-    print(f"State size: {state_size}, Action size: {action_size}")
-
-    # 创建智能体
-    print(f"Creating {args.agent} agent...")
-    if args.agent == 'sac':
-        agent = SAC(state_size, action_size, config)
-    elif args.agent == 'cqlsac':
-        agent = CQLSAC(state_size, action_size, config)
-    else:
-        agent = SVRL(state_size, action_size, config)
-
-    if args.normalize_states or args.normalize_rewards:
-        agent.set_normalization_stats(normalization_stats)
-        print("Normalization stats set")
-    
-    # 创建logger
-    logger_config = {
-        'algorithm': args.agent,
-        'env_name': config['env'],
-        'seed': seed,
-        'batch_size': config['batch_size'],
-        'learning_rate': config['learning_rate'],
-        'normalize_states': args.normalize_states,
-        'normalize_rewards': args.normalize_rewards,
-        'dataset': args.dataset
-    }
-    
-    logger = Logger(
-        project_name=config.get('project_name', 'Offline RL'),
-        config=logger_config,
-        output_dir=os.path.join("logs", f"{args.agent}_{seed}"),
-        use_wandb=config.get('use_wandb', False),
-        group=config.get('group', f"{args.agent}-{config['env']}"),
-        name=f"{config.get('name', args.agent)}_{args.dataset.split('/')[-1]}_seed{seed}"
-    )
-    print("Logger initialized")
-    
-    # 设置CUDA性能优化
-    if config['device'] == 'cuda':
-        print("\nOptimizing CUDA performance...")
-        torch.backends.cudnn.benchmark = True
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        print("CUDA optimization settings applied")
-    
-    # 训练循环
-    total_steps = 0
-    best_return = float('-inf')
-    episode_returns = []
-    
-    print("\nStarting training loop...")
-    print(f"Total episodes: {config['episodes']}")
-    print(f"Eval frequency: every {config['eval_every']} episodes")
-    print(f"Log frequency: every {config['log_every']} steps")
-    
-    # 预计算总步数
-    steps_per_epoch = len(data_loader)
-    total_expected_steps = steps_per_epoch * config['episodes']
-    print(f"Steps per epoch: {steps_per_epoch}")
-    print(f"Total expected steps: {total_expected_steps}")
-    
-    start_time = time.time()
-    last_log_time = start_time
-    
-    for episode in range(1, config['episodes'] + 1):
-        epoch_start_time = time.time()
         
-        for batch_idx, batch in enumerate(data_loader):
-            # 将batch转到目标设备
-            for k in batch:
-                batch[k] = batch[k].to(config['device'])
-            
-            # 更新智能体
-            metrics = agent.update(batch)
-            total_steps += 1
-            
-            # 记录日志
-            if total_steps % config['log_every'] == 0:
-                current_time = time.time()
-                steps_per_second = config['log_every'] / (current_time - last_log_time)
-                last_log_time = current_time
+        env = self.dataset.env
+        env.action_space.seed(seed)
+
+        batches = 0
+        average10 = deque(maxlen=10)
+
+        # Extract dataset name for project
+        dataset_name = self.dataset_name.split('/')[-1] if '/' in self.dataset_name else self.dataset_name
+        project_name = f"Offline SAC Exp ({dataset_name})"
+        run_name = f"{self.agent_type}_seed{seed}"
+        
+        with wandb.init(project=project_name, group=self.agent_type, name=run_name, config=self.config):
+            agent = self.create_agent()
+            wandb.watch(agent, log = "gradients", log_freq = 10)
+            if self.config.get('log_video', False):
+                env = gym.wrappers.RecordVideo(env, './video', episode_trigger=lambda x: True)
+
+        eval_reward, eval_std = self.evaluate(env, agent)
+        sample_states, sample_actions, _, _, _ = next(iter(self.dataloader))
+        avg_rank = log_approximate_rank(agent, sample_states, sample_actions, num_samples = 10, sample_size=(64,64), delta = 0.01)
+        wandb.log({"Test Reward": eval_reward, "Reward Std": eval_std, "Episode": 0, "Batches": batches, "Avg_Rank" : avg_rank}, step = batches)
+        episodes = self.config.get("episodes", 100)
+        for i in range(1, episodes + 1):
+            for batch_idx, batch in enumerate(self.dataloader):
+                # Extract batch data
+                states = batch['state']
+                actions = batch['actions'] 
+                rewards = batch['rewards']
+                next_states = batch['next_states']
+                dones = batch['dones']
                 
-                print(f"\rEpisode {episode}/{config['episodes']} "
-                      f"[{batch_idx+1}/{len(data_loader)}] "
-                      f"Steps: {total_steps}/{total_expected_steps} "
-                      f"({steps_per_second:.1f} steps/s) "
-                      f"Loss: {metrics['critic1_loss']:.3f}", end="")
+                # Move to device
+                device = self.config.get('device', 'cuda')
+                states = states.to(device)
+                actions = actions.to(device)
+                rewards = rewards.to(device)
+                next_states = next_states.to(device)
+                dones = dones.to(device)
                 
-                logger.log_metrics(metrics, total_steps)
-        
-        epoch_time = time.time() - epoch_start_time
-        print(f"\nEpisode {episode} completed in {epoch_time:.2f}s")
-        
-        # 评估
-        if episode % config['eval_every'] == 0:
-            print(f"\nEvaluating at episode {episode}...")
-            mean_return, std_return = evaluate_policy(
-                eval_env,
-                agent,
-                config['eval_episodes'],
-                deterministic=True
-            )
-            episode_returns.append(mean_return)
+                # Call agent.learn with proper format
+                policy_loss, alpha_loss, bellmann_error1, bellmann_error2, cql1_loss, cql2_loss, current_alpha, lagrange_alpha_loss, lagrange_alpha = agent.learn((states, actions, rewards, next_states, dones))
+                batches += 1
+
+            if i % self.config.get('eval_every', 1) == 0:
+                eval_reward, eval_std = self.evaluate(env, agent)
+                sample_states, sample_actions, _, _, _ = next(iter(self.dataloader))
+                avg_rank = log_approximate_rank(agent, sample_states, sample_actions, num_samples=10, sample_size=(64, 64), delta=0.01)
+                wandb.log({"Test Reward": eval_reward, "Reward Std": eval_std, "Episode": i, "Batches": batches, "Avg_Rank" : avg_rank}, step=batches)
+
+                average10.append(eval_reward)
+                print("Episode: {} | Reward: {} | Policy Loss: {} | Batches: {}".format(i, eval_reward, policy_loss, batches,))
             
-            print(f"Evaluation results - Mean return: {mean_return:.2f} ± {std_return:.2f}")
-            
-            logger.log_metrics({
-                'eval/mean_return': mean_return,
-                'eval/std_return': std_return,
-                'eval/episode': episode
-            }, total_steps)
-            
-            # 保存最佳模型
-            if mean_return > best_return:
-                best_return = mean_return
-                if config.get('save_best', True):
-                    os.makedirs("models", exist_ok=True)
-                    save_path = f"models/{args.agent}_{config['env']}_seed{seed}_best.pt"
-                    agent.save(save_path)
-                    print(f"New best model saved to {save_path}")
-    
-    total_time = time.time() - start_time
-    print(f"\nTraining completed in {total_time:.2f}s")
-    print(f"Best return achieved: {best_return:.2f}")
-    
-    return best_return, episode_returns
+            wandb.log({
+                       "Average10": np.mean(average10),
+                       "Policy Loss": policy_loss,
+                       "Alpha Loss": alpha_loss,
+                       "Lagrange Alpha Loss": lagrange_alpha_loss,
+                       "CQL1 Loss": cql1_loss,
+                       "CQL2 Loss": cql2_loss,
+                       "Bellman error 1": bellmann_error1,
+                       "Bellman error 2": bellmann_error2,
+                       "Alpha": current_alpha,
+                       "Lagrange Alpha": lagrange_alpha,
+                       "Batches": batches,
+                       "Episode": i})
+
+            if (i %10 == 0) and self.config.get('log_video', False):
+                mp4list = glob.glob('video/*.mp4')
+                if len(mp4list) > 1:
+                    mp4 = mp4list[-2]
+                    wandb.log({"gameplays": wandb.Video(mp4, caption='episode: '+str(i-10), fps=4, format="gif"), "Episode": i})
+
+            if i % self.config.get('save_every', 50) == 0:
+                # Save model checkpoint
+                os.makedirs("models", exist_ok=True)
+                save_path = f"models/{self.agent_type}_checkpoint_episode_{i}.pt"
+                agent.save(save_path)
+                print(f"Model saved at episode {i}: {save_path}")
+
+    def train(self, seeds):
+        for seed in seeds:
+            print("training seed:", seed)
+            self.train_once(seed)
 
 def main():
-    # 解析参数
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='Train offline RL agents with Minari datasets')
     parser.add_argument('--config', type=str, required=True, help='Path to config file')
-    parser.add_argument('--agent', type=str, required=True, choices=['sac', 'cqlsac', 'svrl'])
-    parser.add_argument('--dataset', type=str, required=True, help='Minari dataset name')
-    parser.add_argument('--normalize_states', action='store_true', help='Whether to normalize states')
-    parser.add_argument('--normalize_rewards', action='store_true', help='Whether to normalize rewards')
-    parser.add_argument('--num_trials', type=int, default=1, help='Number of complete training runs')
-    parser.add_argument('--seeds', type=str, default='42', help='Comma-separated list of seeds')
+    parser.add_argument('--agent', type=str, required=True, choices=['sac', 'cqlsac', 'svrl'], help='Agent type')
+    parser.add_argument('--dataset', type=str, required=True, help='Minari dataset name (e.g., halfcheetah-medium-v2)')
+    parser.add_argument('--seeds', type=str, default='42', help='Comma-separated seeds or single seed')
+    parser.add_argument('--num_trials', type=int, default=1, help='Number of trials if using auto-generated seeds')
+    
     args = parser.parse_args()
     
-    # 加载配置
-    config = load_config(args.config)
-    
-    # 解析种子
+    # Parse seeds
     if ',' in args.seeds:
-        seeds = [int(s) for s in args.seeds.split(',')]
+        seeds = [int(s.strip()) for s in args.seeds.split(',')]
     else:
         seed_start = int(args.seeds)
         seeds = list(range(seed_start, seed_start + args.num_trials))
     
-    # 运行多次训练
-    trial_returns = []
-    all_episode_returns = []
+    print(f"Starting training with agent: {args.agent}")
+    print(f"Dataset: {args.dataset}")
+    print(f"Config: {args.config}")
+    print(f"Seeds: {seeds}")
     
-    print(f"\n=== Starting {len(seeds)} complete training runs ===")
-    for i, seed in enumerate(seeds):
-        print(f"\nTrial {i+1}/{len(seeds)} (seed={seed})")
-        best_return, episode_returns = train_once(args, config, seed)
-        trial_returns.append(best_return)
-        all_episode_returns.append(episode_returns)
+    # Create trainer and run training
+    trainer = Trainer(args.dataset, args.agent, args.config)
+    trainer.train(seeds)
     
-    # 计算并打印最终结果
-    trial_mean = np.mean(trial_returns)
-    trial_std = np.std(trial_returns)
-    print("\n=== Final Results ===")
-    print(f"Across {len(seeds)} complete trials:")
-    print(f"Mean best return: {trial_mean:.2f} ± {trial_std:.2f}")
-    
-    # 计算学习曲线的统计信息
-    episode_returns_array = np.array(all_episode_returns)
-    mean_curve = np.mean(episode_returns_array, axis=0)
-    std_curve = np.std(episode_returns_array, axis=0)
-    print("\nLearning curve statistics:")
-    print(f"Final performance: {mean_curve[-1]:.2f} ± {std_curve[-1]:.2f}")
-    
-    # 保存结果
-    results = {
-        'trial_returns': trial_returns,
-        'trial_mean': trial_mean,
-        'trial_std': trial_std,
-        'learning_curves': all_episode_returns,
-        'curve_mean': mean_curve.tolist(),
-        'curve_std': std_curve.tolist(),
-        'config': config,
-        'args': vars(args),
-        'seeds': seeds
-    }
-    
-    import json
-    from datetime import datetime
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    with open(f"results_{args.agent}_{timestamp}.json", 'w') as f:
-        json.dump(results, f, indent=2)
+    print("Training completed!")
 
 if __name__ == "__main__":
     main()

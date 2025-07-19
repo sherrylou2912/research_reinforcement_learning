@@ -21,14 +21,26 @@ conda activate offline-rl
 
 ### Training
 ```bash
-# Basic training command
-python train.py --config config/sac.yaml --agent sac --dataset 'mujoco/halfcheetah/medium-v0' --normalize_states --normalize_rewards
+# CQL training with default seed (42)
+python train.py --config config/cql.yaml --agent cqlsac --dataset halfcheetah-medium-v2
 
-# Multiple seeds
-python train.py --config config/cql.yaml --agent cqlsac --dataset 'mujoco/halfcheetah/medium-v0' --normalize_states --normalize_rewards
+# CQL training with specific seed
+python train.py --config config/cql.yaml --agent cqlsac --dataset halfcheetah-medium-v2 --seeds 123
 
-# Multiple trials
-python train.py --config config/svrl.yaml --agent svrl --dataset "D4RL/hopper/expert-v2" --num_trials 5
+# CQL training with multiple seeds
+python train.py --config config/cql.yaml --agent cqlsac --dataset halfcheetah-medium-v2 --seeds "42,123,456"
+
+# CQL training with multiple trials (auto-generated seeds)
+python train.py --config config/cql.yaml --agent cqlsac --dataset halfcheetah-medium-v2 --num_trials 3
+
+# Other Minari datasets
+python train.py --config config/cql.yaml --agent cqlsac --dataset hopper-medium-v2
+python train.py --config config/cql.yaml --agent cqlsac --dataset walker2d-medium-v2
+python train.py --config config/cql.yaml --agent cqlsac --dataset ant-medium-v2
+
+# SAC/SVRL training (if configs available)
+python train.py --config config/sac.yaml --agent sac --dataset halfcheetah-medium-v2
+python train.py --config config/svrl.yaml --agent svrl --dataset halfcheetah-medium-v2
 ```
 
 ### Development
