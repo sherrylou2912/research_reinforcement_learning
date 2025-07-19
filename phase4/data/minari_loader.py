@@ -9,159 +9,106 @@ class MinariDataset(Dataset):
     def __init__(
         self,
         dataset_name: str,
-        normalize_states: bool = False,
-        normalize_rewards: bool = False,
-        download: bool = True
+        validate_dataset = False
     ):
         """
         Initialize Minari dataset
         
         Args:
             dataset_name: Name of the Minari dataset
-            normalize_states: Whether to normalize states
-            normalize_rewards: Whether to normalize rewards
-            download: Whether to download dataset if not found
         """
-        # 加载数据集
-        print(f"Loading Minari dataset: {dataset_name}")
-        try:
-            self.dataset = minari.load_dataset(dataset_name)
-        except FileNotFoundError:
-            if download:
-                print(f"Dataset {dataset_name} not found locally. Downloading...")
-                minari.download_dataset(dataset_name)
-                self.dataset = minari.load_dataset(dataset_name)
-            else:
-                raise
-        
-        # 转换为numpy数组
-        all_episodes = list(self.dataset.iterate_episodes())
-        
-        # 合并所有episode的数据
-        self.observations = np.concatenate([ep.observations for ep in all_episodes])
-        self.actions = np.concatenate([ep.actions for ep in all_episodes])
-        self.rewards = np.concatenate([ep.rewards for ep in all_episodes])
-        self.terminals = np.concatenate([ep.terminations for ep in all_episodes])
-        
-        # 构建 next_observations
-        self.next_observations = []
-        for ep in all_episodes:
-            # 对于每个 episode，next_observations 是当前 observations 向后移一位
-            # 最后一个 next_observation 使用零向量或当前状态
-            ep_next_obs = np.roll(ep.observations, -1, axis=0)
-            ep_next_obs[-1] = ep.observations[-1]  # 最后一个状态的下一个状态仍然是它自己
-            self.next_observations.append(ep_next_obs)
-        self.next_observations = np.concatenate(self.next_observations)
-        
-        # 确保所有数组长度一致
-        min_length = min(len(self.observations), len(self.actions), 
-                        len(self.rewards), len(self.terminals), len(self.next_observations))
-        
-        self.observations = self.observations[:min_length]
-        self.actions = self.actions[:min_length]
-        self.rewards = self.rewards[:min_length]
-        self.terminals = self.terminals[:min_length]
-        self.next_observations = self.next_observations[:min_length]
-        
-        # 计算归一化统计量
-        self.state_mean = None
-        self.state_std = None
-        self.reward_mean = None
-        self.reward_std = None
-        
-        if normalize_states:
-            print("Computing state normalization statistics...")
-            self.state_mean = np.mean(self.observations, axis=0)
-            self.state_std = np.std(self.observations, axis=0) + 1e-8
-            
-            # 应用归一化
-            self.observations = (self.observations - self.state_mean) / self.state_std
-            self.next_observations = (self.next_observations - self.state_mean) / self.state_std
-        
-        if normalize_rewards:
-            print("Computing reward normalization statistics...")
-            self.reward_mean = np.mean(self.rewards)
-            self.reward_std = np.std(self.rewards) + 1e-8
-            
-            # 应用归一化
-            self.rewards = (self.rewards - self.reward_mean) / self.reward_std
-        
-        print(f"Dataset loaded with {len(self)} transitions")
-        
-    def __len__(self) -> int:
-        return len(self.observations)
-    
-    def __getitem__(self, idx: int) -> Dict[str, np.ndarray]:
-        # 检查索引是否在有效范围内
-        if idx >= len(self.observations):
-            raise IndexError(f"Index {idx} is out of bounds for dataset with {len(self.observations)} samples")
-        
-        return {
-            'observations': self.observations[idx].astype(np.float32),
-            'actions': self.actions[idx].astype(np.float32),
-            'rewards': self.rewards[idx].astype(np.float32),
-            'next_observations': self.next_observations[idx].astype(np.float32),
-            'terminals': self.terminals[idx].astype(np.float32)
-        }
+        # load dataset
+        dataset = minari.load_dataset(dataset_name, download = True)
+        print(f"loading dataset", dataset_name, "completed")
 
-def create_minari_dataloader(
-    dataset_name: str,
-    batch_size: int,
-    normalize_states: bool = False,
-    normalize_rewards: bool = False,
-    device: str = 'cuda',
-    num_workers: int = 4,
-    pin_memory: bool = True,
-    download: bool = True
-) -> Tuple[DataLoader, Optional[Dict]]:
-    """
-    创建Minari数据集的DataLoader
-    
-    Args:
-        dataset_name: Minari数据集名称
-        batch_size: 批量大小
-        normalize_states: 是否归一化状态
-        normalize_rewards: 是否归一化奖励
-        device: 使用的设备
-        num_workers: 数据加载的工作进程数
-        pin_memory: 是否将数据固定在内存中
-        download: 是否下载数据集（如果本地不存在）
+        # get dimensional information
+        if len(dataset) == 0:
+            raise ValueError(f"Dataset {dataset_name} is empty")
         
-    Returns:
-        DataLoader和归一化统计量的元组
-    """
-    # 创建数据集
-    dataset = MinariDataset(
-        dataset_name=dataset_name,
-        normalize_states=normalize_states,
-        normalize_rewards=normalize_rewards,
-        download=download
-    )
+        first_ep = dataset[0]
+        self.state_dim = first_ep.observations[0].shape[0]
+        self.action_dim = first_ep.actions[0].shape[0]
+        print("state_dim: ", self.state_dim, "action_dim: ", self.action_dim)
+
+        # validate dataset compatibility
+        if validate_dataset:
+            self._validate_dataset(dataset)
+        
+        # store data
+        self.obs, self.acts, self.rews, self.dones, self.next_obs = [],[],[],[],[]
+        for ep in dataset:
+            self._store_episode(
+                ep.observations[:-1],
+                ep.actions,
+                ep.rewards,
+                np.logical_or(ep.terminations, ep.truncations),
+                ep.observations[1:]
+            )
+
+        # convert to numpy arrays for efficiency
+        self.obs = np.array(self.obs)
+        self.acts = np.array(self.acts)
+        self.rews = np.array(self.rews)
+        self.dones = np.array(self.dones)
+        self.next_obs = np.array(self.next_obs)
+        
+        self._normalize()
+        print('state, action data normalized, dataset normalization completed')
+        self.priorities = np.ones(len(self.obs)) * 1e-5
+
+    def _validate_dataset(self, dataset):
+        """Validate dataset compatibility and consistency"""
+        for i, ep in enumerate(dataset):
+            # check episode has required attributes
+            if not hasattr(ep, 'observations') or not hasattr(ep, 'actions'):
+                raise ValueError(f"Episode {i} missing required attributes")
+            
+            # check observation/action shapes are consistent
+            for j, obs in enumerate(ep.observations):
+                if obs.shape[0] != self.state_dim:
+                    raise ValueError(f"Episode {i}, step {j}: observation shape {obs.shape[0]} != expected {self.state_dim}")
+            
+            for j, act in enumerate(ep.actions):
+                if act.shape[0] != self.action_dim:
+                    raise ValueError(f"Episode {i}, step {j}: action shape {act.shape[0]} != expected {self.action_dim}")
+            
+            # check episode length consistency
+            if len(ep.observations) != len(ep.actions) + 1:
+                raise ValueError(f"Episode {i}: observations length {len(ep.observations)} != actions length + 1 {len(ep.actions) + 1}")
+            
+            if len(ep.actions) != len(ep.rewards):
+                raise ValueError(f"Episode {i}: actions length {len(ep.actions)} != rewards length {len(ep.rewards)}")
+
+    def _store_episode(self, obs, acts, rews, dones, next_obs):
+        self.obs.extend(obs)
+        self.acts.extend(acts)
+        self.rews.extend(rews)
+        self.dones.extend(dones)
+        self.next_obs.extend(next_obs)
+
+    def _normalize(self):
+        # state normalization
+        self.obs_mean = np.mean(self.obs, axis = 0)
+        self.obs_std = np.std(self.obs, axis = 0) + 1e-8
+        self.obs = (self.obs - self.obs_mean) / self.obs_std
+
+        # action normalization
+        self.act_mean = np.mean(self.acts, axis = 0)
+        self.act_std = np.std(self.acts, axis = 0) + 1e-8
+        self.acts = (self.acts - self.act_mean) / self.act_std
+
+    def update_priorities(self, indices, priorities):
+        self.priorities[indices] = np.abs(priorities.flatten()) + 1e-5
+
+    def __len__(self):
+        return len(self.obs)
     
-    # 确保batch_size不会导致访问超出范围的索引
-    total_samples = len(dataset)
-    effective_batch_size = min(batch_size, total_samples // 2)  # 使用更保守的批处理大小
-    
-    # 创建数据加载器
-    data_loader = DataLoader(
-        dataset,
-        batch_size=effective_batch_size,
-        shuffle=True,
-        num_workers=0,  # 禁用多进程加载
-        pin_memory=pin_memory and device == 'cuda',
-        drop_last=True
-    )
-    
-    print(f"Dataset loaded with batch size {effective_batch_size}")
-    
-    # 返回归一化统计量
-    normalization_stats = None
-    if normalize_states or normalize_rewards:
-        normalization_stats = {
-            'state_mean': dataset.state_mean,
-            'state_std': dataset.state_std,
-            'reward_mean': dataset.reward_mean,
-            'reward_std': dataset.reward_std
-        }
-    
-    return data_loader, normalization_stats 
+    def __getitem__(self, idx):
+        return (
+            idx, 
+            torch.FloatTensor(self.obs[idx]),
+            torch.FloatTensor(self.acts[idx]),
+            torch.FloatTensor(self.next_obs[idx]),
+            torch.FloatTensor([self.rews[idx]]),
+            torch.FloatTensor([bool(self.dones[idx])])
+        )
