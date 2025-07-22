@@ -17,7 +17,7 @@ cql_alpha: 0.2         # CQL regularization coefficient
 temp: 1.0              # CQL temperature parameter
 with_lagrange: false   # Enable Lagrange multiplier for automatic CQL tuning
 target_action_gap: 10  # Target conservative gap when using Lagrange
-cql_weight: 1.0        # Weight for CQL loss
+cql_weight: 0.1        # Weight for CQL loss
 num_random: 10         # Number of random actions for CQL
 
 # ===================== SAC Parameters =====================

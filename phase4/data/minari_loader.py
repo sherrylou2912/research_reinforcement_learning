@@ -20,6 +20,8 @@ class MinariDataset(Dataset):
         # load dataset
         dataset = minari.load_dataset(dataset_name, download = True)
         print(f"loading dataset", dataset_name, "completed")
+        self.env = dataset.recover_environment()
+        print(f"recovering environment suceessful")
 
         # get dimensional information
         if len(dataset) == 0:
@@ -92,13 +94,26 @@ class MinariDataset(Dataset):
         self.obs_std = np.std(self.obs, axis = 0) + 1e-8
         self.obs = (self.obs - self.obs_mean) / self.obs_std
 
-        # action normalization
+        # action normalization - store stats but don't normalize actions
         self.act_mean = np.mean(self.acts, axis = 0)
         self.act_std = np.std(self.acts, axis = 0) + 1e-8
-        self.acts = (self.acts - self.act_mean) / self.act_std
+        print(f"🔍 DATASET ACTION ANALYSIS:")
+        print(f"  Original action range: [{self.acts.min():.3f}, {self.acts.max():.3f}]")
+        print(f"  Original action mean: {self.act_mean}")
+        print(f"  Original action std: {self.act_std}")
+        # Don't normalize actions - keep them in original range
+        # self.acts = (self.acts - self.act_mean) / self.act_std
 
     def update_priorities(self, indices, priorities):
         self.priorities[indices] = np.abs(priorities.flatten()) + 1e-5
+
+    def get_normalization_stats(self):
+        return {
+            'state_mean': self.obs_mean,
+            'state_std':self.obs_std,
+            'action_mean':self.act_mean,
+            'action_std': self.act_std
+        }
 
     def __len__(self):
         return len(self.obs)

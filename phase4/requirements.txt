@@ -1,8 +1,37 @@
+# Core ML Framework
 torch>=2.2.0
-numpy>=1.26.4
+torchvision>=0.17.0
+
+# Reinforcement Learning Environment
 gymnasium>=0.29.1
-minari
-wandb>=0.16.3
+minari>=0.4.0
+
+# Data Science & Computation
+numpy>=1.26.4
+scipy>=1.11.0
+
+# Configuration & Utilities
 pyyaml>=6.0.1
+argparse
+
+# Logging & Monitoring
+wandb>=0.16.3
+tensorboard>=2.15.0
+
+# Video Recording & Visualization
+matplotlib>=3.8.3
+imageio>=2.33.0
+imageio-ffmpeg>=0.4.9
+opencv-python>=4.9.0
+
+# Progress bars and CLI utilities
 tqdm>=4.66.2
-matplotlib>=3.8.3 
+rich>=13.7.0
+
+# Development & Testing (optional)
+pytest>=8.0.0
+black>=24.0.0
+flake8>=7.0.0
+
+# Optional: Mujoco environments (uncomment if using mujoco-based datasets)
+# mujoco>=3.1.0 

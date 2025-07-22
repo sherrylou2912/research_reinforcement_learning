@@ -44,11 +44,14 @@ def log_approximate_rank(
         Estimated log rank
     """
     ranks = []
+    # Get device from agent's critic network
+    device = next(agent.critic1.parameters()).device
+    
     for _ in range(num_samples):
         # Sample random states and actions
         idx = torch.randint(0, states.shape[0], (sample_size[0],))
-        s = states[idx]
-        a = actions[idx]
+        s = states[idx].to(device)
+        a = actions[idx].to(device)
         
         # Compute Q-values
         with torch.no_grad():

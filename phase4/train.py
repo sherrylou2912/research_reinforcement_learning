@@ -10,7 +10,7 @@ import numpy as np
 import time # Added for timing
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from collections import deque
-from torch.optim.lr_scheduler import CosineAnnelingWarmRestarts
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 import random
 import wandb
 import glob
@@ -49,22 +49,100 @@ class Trainer:
             raise ValueError(f"Unknown agent type: {self.agent_type}")
         
     def evaluate(self, env, policy):
+        print(f"\n🎮 EVALUATION DEBUG:")
         reward_batch = []
         eval_runs = self.config.get('eval_episodes', 5)
+        
         for i in range(eval_runs):
-            state, _ = env.reset()
+            print(f"\n--- Evaluation Episode {i+1}/{eval_runs} ---")
+            
+            # Environment reset
+            reset_result = env.reset()
+            if isinstance(reset_result, tuple):
+                state, _ = reset_result
+            else:
+                state = reset_result
+                
+            print(f"  Initial state shape: {state.shape}")
+            print(f"  Initial state range: [{state.min():.3f}, {state.max():.3f}]")
+            print(f"  Initial state mean: {state.mean():.3f}")
+            
             rewards = 0
             step = 0
-            max_steps = 1000  # Add max steps to prevent infinite loops
+            max_steps = 1000
+            action_samples = []
+            reward_samples = []
+            
             while step < max_steps: 
-                action = policy.get_action(state, eval = True)
-                state, reward, done, truncated, _ = env.step(action)
-                rewards += reward
-                step += 1
-                if done or truncated:
+                # Get action with debugging for first few steps
+                if step < 3:
+                    print(f"\n  Step {step}:")
+                    print(f"    Input state range: [{state.min():.3f}, {state.max():.3f}]")
+                    
+                action = policy.get_action(state, eval=True)
+                
+                if step < 3:
+                    print(f"    Action: {action[:3]}... (first 3)")
+                    print(f"    Action range: [{action.min():.3f}, {action.max():.3f}]")
+                
+                # Environment step
+                step_result = env.step(action)
+                
+                if len(step_result) == 5:
+                    # New gym API: (obs, reward, terminated, truncated, info)
+                    next_state, reward, done, truncated, info = step_result
+                    done = done or truncated
+                elif len(step_result) == 4:
+                    # Old gym API: (obs, reward, done, info)
+                    next_state, reward, done, info = step_result
+                else:
+                    print(f"    🚨 Unexpected step return length: {len(step_result)}")
                     break
+                
+                if step < 3:
+                    print(f"    Reward: {reward:.3f}")
+                    print(f"    Done: {done}")
+                    print(f"    Next state range: [{next_state.min():.3f}, {next_state.max():.3f}]")
+                
+                rewards += reward
+                action_samples.append(action.copy())
+                reward_samples.append(reward)
+                
+                state = next_state
+                step += 1
+                
+                if done:
+                    break
+            
+            print(f"\n  Episode {i+1} Summary:")
+            print(f"    Total steps: {step}")
+            print(f"    Total reward: {rewards:.3f}")
+            print(f"    Avg step reward: {np.mean(reward_samples):.3f}")
+            print(f"    Reward std: {np.std(reward_samples):.3f}")
+            print(f"    Episode ended by: {'done/truncated' if step < max_steps else 'max_steps'}")
+            
+            # Action analysis
+            if len(action_samples) > 0:
+                actions_array = np.array(action_samples)
+                print(f"    Action stats - Mean: {actions_array.mean(axis=0)[:3]}...")
+                print(f"    Action stats - Std: {actions_array.std(axis=0)[:3]}...")
+                print(f"    Action range: [{actions_array.min():.3f}, {actions_array.max():.3f}]")
+            
             reward_batch.append(rewards)
-        return np.mean(reward_batch), np.std(reward_batch)
+        
+        if len(reward_batch) == 0:
+            return 0.0, 0.0
+        
+        final_mean = np.mean(reward_batch)
+        final_std = np.std(reward_batch)
+        
+        print(f"\n🎯 EVALUATION SUMMARY:")
+        print(f"  Episodes: {len(reward_batch)}")
+        print(f"  Mean reward: {final_mean:.3f}")
+        print(f"  Std reward: {final_std:.3f}")
+        print(f"  Reward range: [{min(reward_batch):.3f}, {max(reward_batch):.3f}]")
+        
+        return final_mean, final_std
         
     def train_once(self, seed):
         np.random.seed(seed)
@@ -73,7 +151,7 @@ class Trainer:
 
         self.dataloader = DataLoader(
             self.dataset,
-            batch_size = float(self.config.get('batch_size', 1024)),
+            batch_size = int(self.config.get('batch_size', 1024)),
             sampler = WeightedRandomSampler(
             self.dataset.priorities,
             num_samples = len(self.dataset),
@@ -103,71 +181,81 @@ class Trainer:
         
         with wandb.init(project=project_name, group=self.agent_type, name=run_name, config=self.config):
             agent = self.create_agent()
+            normalization_stats = self.dataset.get_normalization_stats()
+            #print(f" Normalization Stats: {normalization_stats}")
+            agent.set_normalization_stats(normalization_stats)
             wandb.watch(agent, log = "gradients", log_freq = 10)
             if self.config.get('log_video', False):
                 env = gym.wrappers.RecordVideo(env, './video', episode_trigger=lambda x: True)
 
-        eval_reward, eval_std = self.evaluate(env, agent)
-        sample_states, sample_actions, _, _, _ = next(iter(self.dataloader))
-        avg_rank = log_approximate_rank(agent, sample_states, sample_actions, num_samples = 10, sample_size=(64,64), delta = 0.01)
-        wandb.log({"Test Reward": eval_reward, "Reward Std": eval_std, "Episode": 0, "Batches": batches, "Avg_Rank" : avg_rank}, step = batches)
-        episodes = self.config.get("episodes", 100)
-        for i in range(1, episodes + 1):
-            for batch_idx, batch in enumerate(self.dataloader):
-                # Extract batch data
-                states = batch['state']
-                actions = batch['actions'] 
-                rewards = batch['rewards']
-                next_states = batch['next_states']
-                dones = batch['dones']
+            eval_reward, eval_std = self.evaluate(env, agent)
+            sample_batch = next(iter(self.dataloader))
+            sample_states = sample_batch['state']
+            sample_actions = sample_batch['actions']
+            avg_rank = log_approximate_rank(agent, sample_states, sample_actions, num_samples = 10, sample_size=(64,64), delta = 0.01)
+            wandb.log({"Test Reward": eval_reward, "Reward Std": eval_std, "Episode": 0, "Batches": batches, "Avg_Rank" : avg_rank}, step = batches)
+            episodes = self.config.get("episodes", 100)
+            for i in range(1, episodes + 1):
+                agent.set_episode(i)
+                if i <= self.config.get('bc_warmup_episodes', 15):
+                    print(f"🔧 BC warmup episode {agent.current_episode} of {self.config.get('bc_warmup_episodes', 15)}")
+                for batch_idx, batch in enumerate(self.dataloader):
+                    # Extract batch data
+                    states = batch['state']
+                    actions = batch['actions'] 
+                    rewards = batch['rewards']
+                    next_states = batch['next_states']
+                    dones = batch['dones']
+                    
+                    # Move to device
+                    device = self.config.get('device', 'cuda')
+                    states = states.to(device)
+                    actions = actions.to(device)
+                    rewards = rewards.to(device)
+                    next_states = next_states.to(device)
+                    dones = dones.to(device)
+                    
+                    # Call agent.learn with proper format
+                    policy_loss, alpha_loss, bellmann_error1, bellmann_error2, cql1_loss, cql2_loss, current_alpha, lagrange_alpha_loss, lagrange_alpha = agent.learn((states, actions, rewards, next_states, dones))
+                    batches += 1
+
+                if i % self.config.get('eval_every', 1) == 0:
+                    eval_reward, eval_std = self.evaluate(env, agent)
+                    sample_batch = next(iter(self.dataloader))
+                    sample_states = sample_batch['state']
+                    sample_actions = sample_batch['actions']
+                    avg_rank = log_approximate_rank(agent, sample_states, sample_actions, num_samples=10, sample_size=(64, 64), delta=0.01)
+                    wandb.log({"Test Reward": eval_reward, "Reward Std": eval_std, "Episode": i, "Batches": batches, "Avg_Rank" : avg_rank}, step=batches)
+
+                    average10.append(eval_reward)
+                    print("Episode: {} | Reward: {} | Policy Loss: {} | Batches: {} | Avg_Rank: {}".format(i, eval_reward, policy_loss, batches, avg_rank))
                 
-                # Move to device
-                device = self.config.get('device', 'cuda')
-                states = states.to(device)
-                actions = actions.to(device)
-                rewards = rewards.to(device)
-                next_states = next_states.to(device)
-                dones = dones.to(device)
-                
-                # Call agent.learn with proper format
-                policy_loss, alpha_loss, bellmann_error1, bellmann_error2, cql1_loss, cql2_loss, current_alpha, lagrange_alpha_loss, lagrange_alpha = agent.learn((states, actions, rewards, next_states, dones))
-                batches += 1
+                wandb.log({
+                        "Average10": np.mean(average10) if len(average10) > 0 else 0.0,
+                        "Policy Loss": policy_loss,
+                        "Alpha Loss": alpha_loss,
+                        "Lagrange Alpha Loss": lagrange_alpha_loss,
+                        "CQL1 Loss": cql1_loss,
+                        "CQL2 Loss": cql2_loss,
+                        "Bellman error 1": bellmann_error1,
+                        "Bellman error 2": bellmann_error2,
+                        "Alpha": current_alpha,
+                        "Lagrange Alpha": lagrange_alpha,
+                        "Batches": batches,
+                        "Episode": i})
 
-            if i % self.config.get('eval_every', 1) == 0:
-                eval_reward, eval_std = self.evaluate(env, agent)
-                sample_states, sample_actions, _, _, _ = next(iter(self.dataloader))
-                avg_rank = log_approximate_rank(agent, sample_states, sample_actions, num_samples=10, sample_size=(64, 64), delta=0.01)
-                wandb.log({"Test Reward": eval_reward, "Reward Std": eval_std, "Episode": i, "Batches": batches, "Avg_Rank" : avg_rank}, step=batches)
+                if (i %10 == 0) and self.config.get('log_video', False):
+                    mp4list = glob.glob('video/*.mp4')
+                    if len(mp4list) > 1:
+                        mp4 = mp4list[-2]
+                        wandb.log({"gameplays": wandb.Video(mp4, caption='episode: '+str(i-10), fps=4, format="gif"), "Episode": i})
 
-                average10.append(eval_reward)
-                print("Episode: {} | Reward: {} | Policy Loss: {} | Batches: {}".format(i, eval_reward, policy_loss, batches,))
-            
-            wandb.log({
-                       "Average10": np.mean(average10),
-                       "Policy Loss": policy_loss,
-                       "Alpha Loss": alpha_loss,
-                       "Lagrange Alpha Loss": lagrange_alpha_loss,
-                       "CQL1 Loss": cql1_loss,
-                       "CQL2 Loss": cql2_loss,
-                       "Bellman error 1": bellmann_error1,
-                       "Bellman error 2": bellmann_error2,
-                       "Alpha": current_alpha,
-                       "Lagrange Alpha": lagrange_alpha,
-                       "Batches": batches,
-                       "Episode": i})
-
-            if (i %10 == 0) and self.config.get('log_video', False):
-                mp4list = glob.glob('video/*.mp4')
-                if len(mp4list) > 1:
-                    mp4 = mp4list[-2]
-                    wandb.log({"gameplays": wandb.Video(mp4, caption='episode: '+str(i-10), fps=4, format="gif"), "Episode": i})
-
-            if i % self.config.get('save_every', 50) == 0:
-                # Save model checkpoint
-                os.makedirs("models", exist_ok=True)
-                save_path = f"models/{self.agent_type}_checkpoint_episode_{i}.pt"
-                agent.save(save_path)
-                print(f"Model saved at episode {i}: {save_path}")
+                if i % self.config.get('save_every', 50) == 0:
+                    # Save model checkpoint
+                    os.makedirs("models", exist_ok=True)
+                    save_path = f"models/{self.agent_type}_checkpoint_episode_{i}.pt"
+                    agent.save(save_path)
+                    print(f"Model saved at episode {i}: {save_path}")
 
     def train(self, seeds):
         for seed in seeds:
