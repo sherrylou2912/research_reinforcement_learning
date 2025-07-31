@@ -54,8 +54,8 @@ class MinariDataset(Dataset):
         self.dones = np.array(self.dones)
         self.next_obs = np.array(self.next_obs)
         
-        self._normalize()
-        print('state, action data normalized, dataset normalization completed')
+        #self._normalize()
+        #print('state, action data normalized, dataset normalization completed')
         self.priorities = np.ones(len(self.obs)) * 1e-5
 
     def _validate_dataset(self, dataset):
@@ -94,15 +94,10 @@ class MinariDataset(Dataset):
         self.obs_std = np.std(self.obs, axis = 0) + 1e-8
         self.obs = (self.obs - self.obs_mean) / self.obs_std
 
-        # action normalization - store stats but don't normalize actions
+        # action normalization
         self.act_mean = np.mean(self.acts, axis = 0)
         self.act_std = np.std(self.acts, axis = 0) + 1e-8
-        print(f"🔍 DATASET ACTION ANALYSIS:")
-        print(f"  Original action range: [{self.acts.min():.3f}, {self.acts.max():.3f}]")
-        print(f"  Original action mean: {self.act_mean}")
-        print(f"  Original action std: {self.act_std}")
-        # Don't normalize actions - keep them in original range
-        # self.acts = (self.acts - self.act_mean) / self.act_std
+        self.acts = (self.acts - self.act_mean) / self.act_std
 
     def update_priorities(self, indices, priorities):
         self.priorities[indices] = np.abs(priorities.flatten()) + 1e-5
