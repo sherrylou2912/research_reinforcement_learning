@@ -1,0 +1,113 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyTorch model files
+*.pth
+*.pt
+*.pkl
+*.pickle
+
+# Training logs and output files
+*.log
+*.txt
+logs/
+*_logs/
+output/
+outputs/
+
+# Wandb (Weights & Biases) tracking files
+wandb/
+*.wandb
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.nbconvert
+
+# Environment variables
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Results and data files
+results/
+results_*/
+*.npz
+*.npy
+*.csv
+
+# Model checkpoints and trained models
+trained_models/
+checkpoints/
+models/
+*.ckpt
+
+# Configuration backups
+*.bak
+*.backup
+
+# LaTeX
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
