@@ -8,6 +8,7 @@ import argparse
 import glob
 from utils import save, collect_random
 import random
+from tqdm import tqdm 
 
 from agent import SAC
 from torch.utils.data import DataLoader, TensorDataset
@@ -16,7 +17,7 @@ from rank import log_approximate_rank
 
 def get_config():
     parser = argparse.ArgumentParser(description='RL')
-    parser.add_argument("--run_name", type=str, default="CQL_SAC", help="Run name prefix, default: CQL")
+    parser.add_argument("--run_name", type=str, default="Naive_SAC", help="Run name prefix, default: CQL")
     parser.add_argument("--env", type=str, default="halfcheetah-medium-v2", help="Gym environment name, default: Pendulum-v0")
     parser.add_argument("--episodes", type=int, default=200, help="Number of episodes, default: 100")
     parser.add_argument("--seed", type=int, default=1101, help="Seed, default: 1")
@@ -25,10 +26,6 @@ def get_config():
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size, default: 256")
     parser.add_argument("--hidden_size", type=int, default=256, help="")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="")
-    parser.add_argument("--temperature", type=float, default=1.0, help="")
-    parser.add_argument("--cql_weight", type=float, default=1.0, help="")
-    parser.add_argument("--target_action_gap", type=float, default=10, help="")
-    parser.add_argument("--with_lagrange", type=int, default=0, help="")
     parser.add_argument("--tau", type=float, default=5e-3, help="")
     parser.add_argument("--eval_every", type=int, default=1, help="")
     
@@ -91,7 +88,8 @@ def train(config):
     batches = 0
     average10 = deque(maxlen=10)
     
-    with wandb.init(project="Offline SAC Exp (halfcheetah-medium-v2)", group = "Naive-SAC", name=config.run_name, config=config):
+    with wandb.init(project="Offline SAC Exp (halfcheetah-medium-v2)", group = "Naive-SAC", name=config.run_name, 
+                    mode = "offline", config=config):
         
         agent = SAC(state_size=env.observation_space.shape[0],
                         action_size=env.action_space.shape[0],
@@ -110,7 +108,10 @@ def train(config):
         wandb.log({"Test Reward": eval_reward, "Episode": 0, "Batches": batches, "Avg_Rank" : avg_rank}, step=batches)
         for i in range(1, config.episodes+1):
 
-            for batch_idx, experience in enumerate(dataloader):
+            pbar = tqdm(enumerate(dataloader), total = len(dataloader),
+                        desc = f"Episode {i}/{config.episodes}", unit = "batch", leave = False)
+
+            for batch_idx, experience in pbar:
                 states, actions, rewards, next_states, dones = experience
                 states = states.to(device)
                 actions = actions.to(device)
@@ -146,11 +147,11 @@ def train(config):
                     wandb.log({"gameplays": wandb.Video(mp4, caption='episode: '+str(i-10), fps=4, format="gif"), "Episode": i})
 
             if i % config.save_every == 0:
-                save(config, save_name="IQL", model=agent.actor_local, wandb=wandb, ep=0)
+                save(config, save_name="SAC", model=agent.actor_local, wandb=wandb, ep=0)
 
 if __name__ == "__main__":
     base_config = get_config()
-    seeds = [1101, 927, 1229, 618, 45]
+    seeds = [618, 45]
     for seed in seeds:
         config = argparse.Namespace(**vars(base_config))
         config.seed = seed

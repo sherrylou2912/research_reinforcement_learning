@@ -10,7 +10,7 @@ import copy
 from svrl_utils import softimp
 
 
-class SAC(nn.Module):
+class SVRLSAC(nn.Module):
     """Interacts with and learns from the environment."""
     
     def __init__(self,
@@ -19,6 +19,10 @@ class SAC(nn.Module):
                         tau,
                         hidden_size,
                         learning_rate,
+                        n_action_sample,
+                        rank,
+                        mask_prob,
+                        lambda_struct,
                         device
                 ):
         """Initialize an Agent object.
@@ -29,7 +33,7 @@ class SAC(nn.Module):
             action_size (int): dimension of each action
             random_seed (int): random seed
         """
-        super(SAC, self).__init__()
+        super(SVRLSAC, self).__init__()
         self.state_size = state_size
         self.action_size = action_size
 
@@ -46,6 +50,12 @@ class SAC(nn.Module):
         self.log_alpha = torch.tensor([0.0], requires_grad=True)
         self.alpha = self.log_alpha.exp().detach()
         self.alpha_optimizer = optim.Adam(params=[self.log_alpha], lr=learning_rate) 
+
+        # SVRL param
+        self.n_action_sample = n_action_sample
+        self.mask_prob = mask_prob
+        self.lambda_struct = lambda_struct
+        self.rank = rank 
         
         # Actor Network 
 
@@ -134,14 +144,39 @@ class SAC(nn.Module):
 
         # ---------------------------- update critic ---------------------------- #
         with torch.no_grad():
-            next_actions, next_log_probs = self.actor_local.evaluate(next_states)
-            
-            Q_target_next = torch.min(
-                self.critic1_target(next_states, next_actions),
-                self.critic2_target(next_states, next_actions)
-            )
+            B = next_states.size(0)
+            K = self.n_action_sample
+            A = self.action_size
 
-            Q_targets = rewards + self.gamma * (1 - dones) * (Q_target_next - self.alpha.to(self.device) * next_log_probs) 
+            # Expand next_states for batch-wise K action sampling
+            next_expanded = next_states.unsqueeze(1).repeat(1, K, 1).reshape(B * K, -1)
+            a_pi_all, _ = self.actor_local.evaluate(next_expanded)
+            _, new_log_pis = self.actor_local.evaluate(next_states) 
+
+            # Compute target Q values
+            q1 = self.critic1_target(next_expanded, a_pi_all)
+            q2 = self.critic2_target(next_expanded, a_pi_all)
+            qmin = torch.min(q1, q2).squeeze(-1).view(B, K)
+
+            # SoftImpute-based low-rank reconstruction
+            Q_target_recon = softimp(qmin, mask_prob=self.mask_prob, rank=self.rank, n_iter=30).to(self.device)
+
+            # Align column corresponding to π(s') action
+            a_pi_first = a_pi_all.view(B, K, A)[:, 0, :]  # [B, A]
+            a_pi_all_full = a_pi_all.view(B, K, A)
+            dists = torch.norm(a_pi_all_full - a_pi_first.unsqueeze(1), dim=2)
+            align_idx = torch.argmin(dists, dim=1)
+            row_idx = torch.arange(B, device=self.device)
+            
+            # Extract π(s') column Q-value from low-rank Q_target matrix
+            Q_target_next_struct = Q_target_recon[row_idx, align_idx].unsqueeze(1)
+            Q_target_next_true = torch.min(
+                self.critic1_target(next_states, a_pi_first),
+                self.critic2_target(next_states, a_pi_first)
+            )- self.alpha.to(self.device) * new_log_pis
+
+            Q_target_next = (1 - self.lambda_struct) * Q_target_next_true + self.lambda_struct * Q_target_next_struct
+            Q_targets = rewards + self.gamma * (1 - dones) * (Q_target_next)
 
         # Compute critic loss
         q1 = self.critic1(states, actions)

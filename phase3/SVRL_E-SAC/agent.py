@@ -10,7 +10,7 @@ import copy
 from svrl_utils import softimp
 
 
-class SAC(nn.Module):
+class SVRLSAC(nn.Module):
     """Interacts with and learns from the environment."""
     
     def __init__(self,
@@ -19,6 +19,11 @@ class SAC(nn.Module):
                         tau,
                         hidden_size,
                         learning_rate,
+                        n_action_sample,
+                        rank,
+                        mask_prob,
+                        lambda_recon,
+                        zeta,
                         device
                 ):
         """Initialize an Agent object.
@@ -29,7 +34,7 @@ class SAC(nn.Module):
             action_size (int): dimension of each action
             random_seed (int): random seed
         """
-        super(SAC, self).__init__()
+        super(SVRLSAC, self).__init__()
         self.state_size = state_size
         self.action_size = action_size
 
@@ -46,6 +51,13 @@ class SAC(nn.Module):
         self.log_alpha = torch.tensor([0.0], requires_grad=True)
         self.alpha = self.log_alpha.exp().detach()
         self.alpha_optimizer = optim.Adam(params=[self.log_alpha], lr=learning_rate) 
+
+        # SVRL param
+        self.n_action_sample = n_action_sample
+        self.mask_prob = mask_prob
+        self.lambda_recon = lambda_recon
+        self.rank = rank 
+        self.zeta = zeta
         
         # Actor Network 
 
@@ -102,7 +114,26 @@ class SAC(nn.Module):
         random_values = critic(obs, actions)
         random_log_probs = math.log(0.5 ** self.action_size)
         return random_values - random_log_probs
-    
+
+    def _compute_matrix_reconstruction_loss(self, critic_network, states, actions, K=None):
+        
+        B = states.size(0)
+        A = actions.size(-1)
+
+        if K is None:
+            K = self.n_action_sample
+
+        states_expanded = states.unsqueeze(1).repeat(1, K, 1).reshape(B * K, -1)
+
+        with torch.no_grad():
+            sampled_actions_all, _ = self.actor_local.evaluate(states_expanded)
+
+            q_values_all = critic_network(states_expanded, sampled_actions_all)
+            q_min = q_values_all.squeeze(-1).view(B,K)
+            q_recon = softimp(q_min, mask_prob = self.mask_prob, rank = self.rank, zeta = self.zeta, n_iter = 100)
+            reconstruction_loss = F.mse_loss(q_min, q_recon)  
+            return reconstruction_loss
+
     def learn(self, experiences):
         """Updates actor, critics and entropy_alpha parameters using given batch of experience tuples.
         Q_targets = r + γ * (min_critic_target(next_state, actor_target(next_state)) - α *log_pi(next_action|next_state))
@@ -135,13 +166,13 @@ class SAC(nn.Module):
         # ---------------------------- update critic ---------------------------- #
         with torch.no_grad():
             next_actions, next_log_probs = self.actor_local.evaluate(next_states)
-            
+            # Extract π(s') column Q-value from low-rank Q_target matrix
             Q_target_next = torch.min(
                 self.critic1_target(next_states, next_actions),
                 self.critic2_target(next_states, next_actions)
-            )
+            ) - self.alpha.to(self.device) * next_log_probs
 
-            Q_targets = rewards + self.gamma * (1 - dones) * (Q_target_next - self.alpha.to(self.device) * next_log_probs) 
+            Q_targets = rewards + self.gamma * (1 - dones) * (Q_target_next)
 
         # Compute critic loss
         q1 = self.critic1(states, actions)
@@ -150,15 +181,16 @@ class SAC(nn.Module):
         critic1_loss = F.mse_loss(q1, Q_targets)
         critic2_loss = F.mse_loss(q2, Q_targets)
         
-        # Compute critic loss
-        q1 = self.critic1(states, actions)
-        q2 = self.critic2(states, actions)
+        #Reguarize crtic network with recon loss 
 
-        critic1_loss = F.mse_loss(q1, Q_targets)
-        critic2_loss = F.mse_loss(q2, Q_targets)
+        matrix_recon_loss_1 = self._compute_matrix_reconstruction_loss(
+            self.critic1, states, actions)
+
+        matrix_recon_loss_2 = self._compute_matrix_reconstruction_loss(
+            self.critic2, states, actions)
         
-        total_c1_loss = critic1_loss
-        total_c2_loss = critic2_loss
+        total_c1_loss = critic1_loss + self.lambda_recon * matrix_recon_loss_1
+        total_c2_loss = critic2_loss + self.lambda_recon * matrix_recon_loss_2
         
         
         # Update critics

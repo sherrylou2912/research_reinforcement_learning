@@ -1,5 +1,6 @@
 import gym
 import d4rl
+from d4rl.infos import REF_MIN_SCORE, REF_MAX_SCORE
 import numpy as np
 from collections import deque
 import torch
@@ -8,17 +9,25 @@ import argparse
 import glob
 from utils import save, collect_random
 import random
+from tqdm import tqdm 
+import requests
+
 from agent import CQLSAC
 from torch.utils.data import DataLoader, TensorDataset
 from rank import log_approximate_rank
+
+def d4rl_score(task,rew_mean):
+    score = (rew_mean - REF_MIN_SCORE[task]) / (REF_MAX_SCORE[task] - REF_MIN_SCORE[task]) * 100
+    return score 
+
 def get_config():
     parser = argparse.ArgumentParser(description='RL')
-    parser.add_argument("--run_name", type=str, default="CQL_SAC_1101", help="Run name, default: CQL")
-    parser.add_argument("--env", type=str, default="halfcheetah-medium-v2", help="Gym environment name, default: Pendulum-v0")
-    parser.add_argument("--episodes", type=int, default=100, help="Number of episodes, default: 100")
+    parser.add_argument("--run_name", type=str, default="CQL_SAC", help="Run name prefix, default: CQL")
+    parser.add_argument("--env", type=str, default="halfcheetah-random-v2", help="Gym environment name, default: Pendulum-v0")
+    parser.add_argument("--episodes", type=int, default=200, help="Number of episodes, default: 100")
     parser.add_argument("--seed", type=int, default=1101, help="Seed, default: 1")
     parser.add_argument("--log_video", type=int, default=0, help="Log agent behaviour to wanbd when set to 1, default: 0")
-    parser.add_argument("--save_every", type=int, default=100, help="Saves the network every x epochs, default: 25")
+    parser.add_argument("--save_every", type=int, default=200, help="Saves the network every x epochs, default: 25")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size, default: 256")
     parser.add_argument("--hidden_size", type=int, default=256, help="")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="")
@@ -32,7 +41,7 @@ def get_config():
     args = parser.parse_args()
     return args
 
-def prep_dataloader(env_id="halfcheetah-medium-v2", batch_size=256, seed=1):
+def prep_dataloader(env_id="halfcheetah-random-v2", batch_size=256, seed=1):
     env = gym.make(env_id)
     dataset = env.get_dataset()
     tensors = {}
@@ -88,7 +97,7 @@ def train(config):
     batches = 0
     average10 = deque(maxlen=10)
     
-    with wandb.init(project="offline", group = "CQL-SAC", name=config.run_name, config=config):
+    with wandb.init(project="Offline SAC Exp (halfcheetah-random-v2)", group = "CQL-SAC", name=config.run_name, config=config, mode = "offline" ):
         
         agent = CQLSAC(state_size=env.observation_space.shape[0],
                         action_size=env.action_space.shape[0],
@@ -106,12 +115,16 @@ def train(config):
             env = gym.wrappers.Monitor(env, './video', video_callable=lambda x: x%10==0, force=True)
 
         eval_reward = evaluate(env, agent)
+        eval_score = d4rl_score(config.env, eval_reward)
         sample_states, sample_actions, _, _, _ = next(iter(dataloader))
         avg_rank = log_approximate_rank(agent, sample_states, sample_actions, num_samples=10, sample_size=(64, 64), delta=0.01)
-        wandb.log({"Test Reward": eval_reward, "Episode": 0, "Batches": batches, "Avg_Rank" : avg_rank}, step=batches)
+        wandb.log({"Test Reward": eval_reward,"score": eval_score, "Episode": 0, "Batches": batches, "Avg_Rank" : avg_rank}, step=batches)
         for i in range(1, config.episodes+1):
+            
+            pbar = tqdm(enumerate(dataloader), total = len(dataloader),
+                        desc = f"Episode {i}/{config.episodes}", unit = "batch", leave = False)
 
-            for batch_idx, experience in enumerate(dataloader):
+            for batch_idx, experience in pbar:
                 states, actions, rewards, next_states, dones = experience
                 states = states.to(device)
                 actions = actions.to(device)
@@ -123,12 +136,13 @@ def train(config):
 
             if i % config.eval_every == 0:
                 eval_reward = evaluate(env, agent)
+                eval_score = d4rl_score(config.env, eval_reward)
                 sample_states, sample_actions, _, _, _ = next(iter(dataloader))
                 avg_rank = log_approximate_rank(agent, sample_states, sample_actions, num_samples=10, sample_size=(64, 64), delta=0.01)
-                wandb.log({"Test Reward": eval_reward, "Episode": i, "Batches": batches, "Avg_Rank" : avg_rank}, step=batches)
+                wandb.log({"Test Reward": eval_reward, "Test Score": eval_score, "Episode": i, "Batches": batches, "Avg_Rank" : avg_rank}, step=batches)
 
                 average10.append(eval_reward)
-                print("Episode: {} | Reward: {} | Policy Loss: {} | Batches: {}".format(i, eval_reward, policy_loss, batches,))
+                print("Episode: {} | Reward: {} | Score: {} | Policy Loss: {} | Batches: {}".format(i, eval_reward, eval_score, policy_loss, batches,))
             
             wandb.log({
                        "Average10": np.mean(average10),
@@ -149,10 +163,23 @@ def train(config):
                 if len(mp4list) > 1:
                     mp4 = mp4list[-2]
                     wandb.log({"gameplays": wandb.Video(mp4, caption='episode: '+str(i-10), fps=4, format="gif"), "Episode": i})
-
+            if i % 50 == 0:
+                headers = {"Authorization" : "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjU1MDczOCwidXVpZCI6IjJkMTY0NzU1LTFjZjUtNDgwMi04YTNkLWE4ZTkyMGYwNGQ3YiIsImlzX2FkbWluIjpmYWxzZSwiYmFja3N0YWdlX3JvbGUiOiIiLCJpc19zdXBlcl9hZG1pbiI6ZmFsc2UsInN1Yl9uYW1lIjoiIiwidGVuYW50IjoiYXV0b2RsIiwidXBrIjoiIn0.qP-FY_mf7kx38tRnSDZTBC8_IMMGkH9baLTJ1QYDUL1_ytTKkPGGKjCaqp0vh5EO5Q8oybxEFDkPbRSmXgEP7Q"}
+                resp = requests.post("https://www.autodl.com/api/v1/wechat/message/send",
+                     json={
+                         "title": "HalfCateech Exp (Random v2)",
+                         "name": "CQL method",
+                         "content": "Episode: {} | Reward: {} | Score: {} | Policy Loss: {} | Batches: {}".format(i, eval_reward, eval_score, policy_loss, batches)
+                     }, headers = headers)
+                print(resp.content.decode())
             if i % config.save_every == 0:
-                save(config, save_name="IQL", model=agent.actor_local, wandb=wandb, ep=0)
+                save(config, save_name="CQL", model=agent.actor_local, wandb=wandb, ep=0)
 
 if __name__ == "__main__":
-    config = get_config()
-    train(config)
+    base_config = get_config()
+    seeds = [618, 45]
+    for seed in seeds:
+        config = argparse.Namespace(**vars(base_config))
+        config.seed = seed
+        config.run_name = f"{base_config.run_name}_seed{seed}"
+        train(config)

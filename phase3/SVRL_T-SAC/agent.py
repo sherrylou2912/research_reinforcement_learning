@@ -10,7 +10,7 @@ import copy
 from svrl_utils import softimp
 
 
-class CQLSVRLSAC(nn.Module):
+class SVRLSAC(nn.Module):
     """Interacts with and learns from the environment."""
     
     def __init__(self,
@@ -19,14 +19,11 @@ class CQLSVRLSAC(nn.Module):
                         tau,
                         hidden_size,
                         learning_rate,
-                        temp,
-                        with_lagrange,
-                        cql_weight,
-                        target_action_gap,
                         n_action_sample,
                         rank,
                         mask_prob,
                         lambda_struct,
+                        zeta, 
                         device
                 ):
         """Initialize an Agent object.
@@ -37,7 +34,7 @@ class CQLSVRLSAC(nn.Module):
             action_size (int): dimension of each action
             random_seed (int): random seed
         """
-        super(CQLSVRLSAC, self).__init__()
+        super(SVRLSAC, self).__init__()
         self.state_size = state_size
         self.action_size = action_size
 
@@ -54,20 +51,13 @@ class CQLSVRLSAC(nn.Module):
         self.log_alpha = torch.tensor([0.0], requires_grad=True)
         self.alpha = self.log_alpha.exp().detach()
         self.alpha_optimizer = optim.Adam(params=[self.log_alpha], lr=learning_rate) 
-        
-        # CQL params
-        self.with_lagrange = with_lagrange
-        self.temp = temp
-        self.cql_weight = cql_weight
-        self.target_action_gap = target_action_gap
-        self.cql_log_alpha = torch.zeros(1, requires_grad=True)
-        self.cql_alpha_optimizer = optim.Adam(params=[self.cql_log_alpha], lr=learning_rate) 
 
         # SVRL param
         self.n_action_sample = n_action_sample
         self.mask_prob = mask_prob
         self.lambda_struct = lambda_struct
         self.rank = rank 
+        self.zeta = zeta 
         
         # Actor Network 
 
@@ -161,29 +151,23 @@ class CQLSVRLSAC(nn.Module):
             A = self.action_size
 
             # Expand next_states for batch-wise K action sampling
-            next_expand = next_states.unsqueeze(1).repeat(1, K, 1).reshape(B * K, -1)
-
-            # Mix policy + random actions
-            K_policy = K // 2
-            K_rand = K - K_policy
-
-            s_pi = next_states.unsqueeze(1).repeat(1, K_policy, 1).reshape(B * K_policy, -1)
-            a_pi_all, _ = self.actor_local.evaluate(s_pi)
-            a_rand = 2 * torch.rand(B * K_rand, A).to(self.device) - 1
-            a_all = torch.cat([a_pi_all, a_rand], dim=0)  # [B*K, A]
+            next_expanded = next_states.unsqueeze(1).repeat(1, K, 1).reshape(B * K, -1)
+            a_pi_all, _ = self.actor_local.evaluate(next_expanded)
+            _, new_log_pis = self.actor_local.evaluate(next_states) 
 
             # Compute target Q values
-            q1 = self.critic1_target(next_expand, a_all)
-            q2 = self.critic2_target(next_expand, a_all)
+            q1 = self.critic1_target(next_expanded, a_pi_all)
+            q2 = self.critic2_target(next_expanded, a_pi_all)
             qmin = torch.min(q1, q2).squeeze(-1).view(B, K)
 
             # SoftImpute-based low-rank reconstruction
-            Q_target_recon = softimp(qmin, mask_prob=self.mask_prob, rank=self.rank, n_iter=30).to(self.device)
+            Q_target_recon = softimp(qmin, mask_prob=self.mask_prob, rank=self.rank, 
+                                     zeta= self.zeta, n_iter = 100).to(self.device)
 
             # Align column corresponding to π(s') action
-            a_pi_first = a_pi_all.view(B, K_policy, A)[:, 0, :]  # [B, A]
-            a_all_full = a_all.view(B, K, A)
-            dists = torch.norm(a_all_full - a_pi_first.unsqueeze(1), dim=2)
+            a_pi_first = a_pi_all.view(B, K, A)[:, 0, :]  # [B, A]
+            a_pi_all_full = a_pi_all.view(B, K, A)
+            dists = torch.norm(a_pi_all_full - a_pi_first.unsqueeze(1), dim=2)
             align_idx = torch.argmin(dists, dim=1)
             row_idx = torch.arange(B, device=self.device)
             
@@ -192,10 +176,10 @@ class CQLSVRLSAC(nn.Module):
             Q_target_next_true = torch.min(
                 self.critic1_target(next_states, a_pi_first),
                 self.critic2_target(next_states, a_pi_first)
-            )
+            )- self.alpha.to(self.device) * new_log_pis
 
             Q_target_next = (1 - self.lambda_struct) * Q_target_next_true + self.lambda_struct * Q_target_next_struct
-            Q_targets = rewards + self.gamma * (1 - dones) * Q_target_next
+            Q_targets = rewards + self.gamma * (1 - dones) * (Q_target_next)
 
         # Compute critic loss
         q1 = self.critic1(states, actions)
@@ -211,48 +195,8 @@ class CQLSVRLSAC(nn.Module):
         critic1_loss = F.mse_loss(q1, Q_targets)
         critic2_loss = F.mse_loss(q2, Q_targets)
         
-        # CQL addon
-        random_actions = torch.FloatTensor(q1.shape[0] * 10, actions.shape[-1]).uniform_(-1, 1).to(self.device)
-        num_repeat = int (random_actions.shape[0] / states.shape[0])
-        temp_states = states.unsqueeze(1).repeat(1, num_repeat, 1).view(states.shape[0] * num_repeat, states.shape[1])
-        temp_next_states = next_states.unsqueeze(1).repeat(1, num_repeat, 1).view(next_states.shape[0] * num_repeat, next_states.shape[1])
-        
-        current_pi_values1, current_pi_values2  = self._compute_policy_values(temp_states, temp_states)
-        next_pi_values1, next_pi_values2 = self._compute_policy_values(temp_next_states, temp_states)
-        
-        random_values1 = self._compute_random_values(temp_states, random_actions, self.critic1).reshape(states.shape[0], num_repeat, 1)
-        random_values2 = self._compute_random_values(temp_states, random_actions, self.critic2).reshape(states.shape[0], num_repeat, 1)
-        
-        current_pi_values1 = current_pi_values1.reshape(states.shape[0], num_repeat, 1)
-        current_pi_values2 = current_pi_values2.reshape(states.shape[0], num_repeat, 1)
-
-        next_pi_values1 = next_pi_values1.reshape(states.shape[0], num_repeat, 1)
-        next_pi_values2 = next_pi_values2.reshape(states.shape[0], num_repeat, 1)
-        
-        cat_q1 = torch.cat([random_values1, current_pi_values1, next_pi_values1], 1)
-        cat_q2 = torch.cat([random_values2, current_pi_values2, next_pi_values2], 1)
-        
-        assert cat_q1.shape == (states.shape[0], 3 * num_repeat, 1), f"cat_q1 instead has shape: {cat_q1.shape}"
-        assert cat_q2.shape == (states.shape[0], 3 * num_repeat, 1), f"cat_q2 instead has shape: {cat_q2.shape}"
-        
-
-        cql1_scaled_loss = ((torch.logsumexp(cat_q1 / self.temp, dim=1).mean() * self.cql_weight * self.temp) - q1.mean()) * self.cql_weight
-        cql2_scaled_loss = ((torch.logsumexp(cat_q2 / self.temp, dim=1).mean() * self.cql_weight * self.temp) - q2.mean()) * self.cql_weight
-        
-        cql_alpha_loss = torch.FloatTensor([0.0])
-        cql_alpha = torch.FloatTensor([0.0])
-        if self.with_lagrange:
-            cql_alpha = torch.clamp(self.cql_log_alpha.exp(), min=0.0, max=1000000.0).to(self.device)
-            cql1_scaled_loss = cql_alpha * (cql1_scaled_loss - self.target_action_gap)
-            cql2_scaled_loss = cql_alpha * (cql2_scaled_loss - self.target_action_gap)
-
-            self.cql_alpha_optimizer.zero_grad()
-            cql_alpha_loss = (- cql1_scaled_loss - cql2_scaled_loss) * 0.5 
-            cql_alpha_loss.backward(retain_graph=True)
-            self.cql_alpha_optimizer.step()
-        
-        total_c1_loss = critic1_loss + cql1_scaled_loss 
-        total_c2_loss = critic2_loss + cql2_scaled_loss 
+        total_c1_loss = critic1_loss
+        total_c2_loss = critic2_loss
         
         
         # Update critics
@@ -271,7 +215,7 @@ class CQLSVRLSAC(nn.Module):
         self.soft_update(self.critic1, self.critic1_target)
         self.soft_update(self.critic2, self.critic2_target)
         
-        return actor_loss.item(), alpha_loss.item(), critic1_loss.item(), critic2_loss.item(), cql1_scaled_loss.item(), cql2_scaled_loss.item(), current_alpha, cql_alpha_loss.item(), cql_alpha.item()
+        return actor_loss.item(), alpha_loss.item(), critic1_loss.item(), critic2_loss.item(), current_alpha
 
     def soft_update(self, local_model , target_model):
         """Soft update model parameters.
