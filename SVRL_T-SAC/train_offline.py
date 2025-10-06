@@ -32,13 +32,10 @@ def get_config():
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size, default: 256")
     parser.add_argument("--hidden_size", type=int, default=256, help="")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="")
-    parser.add_argument("--n_action_sample", type = int, default = 256, help = "")
-    parser.add_argument("--rank", type = int, default = 8, help = "")
-    parser.add_argument("--lambda_struct", type = float, default = 1.0, help = "")
-    parser.add_argument("--mask_prob", type = float, default = 0.4, help = "")
     parser.add_argument("--tau", type=float, default=5e-3, help="")
     parser.add_argument("--eval_every", type=int, default=1, help="")
-    parser.add_argument("--zeta", type = int, default = 75, help = "") 
+    parser.add_argument("--eta", type = int, default = 75, help = "") 
+    parser.add_argument("--n_q_ensemble", type = int, default=10, help = "")
     
     args = parser.parse_args()
     return args

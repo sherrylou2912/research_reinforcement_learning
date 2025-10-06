@@ -23,21 +23,22 @@ def d4rl_score(task,rew_mean):
 
 def get_config():
     parser = argparse.ArgumentParser(description='RL')
-    parser.add_argument("--run_name", type=str, default="SVRL_SAC", help="Run name prefix, default: CQL")
+    parser.add_argument("--run_name", type=str, default="SVRL_SAC_09230015", help="Run name prefix, default: CQL")
     parser.add_argument("--env", type=str, default="halfcheetah-medium-v2", help="Gym environment name, default: Pendulum-v0")
     parser.add_argument("--episodes", type=int, default=200, help="Number of episodes, default: 100")
     parser.add_argument("--seed", type=int, default=1101, help="Seed, default: 1")
     parser.add_argument("--log_video", type=int, default=0, help="Log agent behaviour to wanbd when set to 1, default: 0")
     parser.add_argument("--save_every", type=int, default=100, help="Saves the network every x epochs, default: 25")
-    parser.add_argument("--batch_size", type=int, default=1024, help="Batch size, default: 256")
+    parser.add_argument("--batch_size", type=int, default=256, help="Batch size, default: 256")
     parser.add_argument("--hidden_size", type=int, default=256, help="")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="")
     parser.add_argument("--n_action_sample", type = int, default = 256, help = "")
     parser.add_argument("--rank", type = int, default = 8, help = "")
     parser.add_argument("--lambda_struct", type = float, default = 1.0, help = "")
-    parser.add_argument("--mask_prob", type = float, default = 0.4, help = "")
+    parser.add_argument("--mask_prob", type = float, default = 0.2, help = "")
     parser.add_argument("--tau", type=float, default=5e-3, help="")
     parser.add_argument("--eval_every", type=int, default=1, help="")
+    parser.add_argument("--zeta", type = int, default = 30, help = "") 
     
     args = parser.parse_args()
     return args
@@ -98,33 +99,48 @@ def train(config):
     batches = 0
     average10 = deque(maxlen=10)
     
-    with wandb.init(project="Offline SAC Exp (halfcheetah-medium-v2)", group = "SVRL-SAC", name=config.run_name, 
-                    mode = "offline", config=config):
-        
-        agent = SVRLSAC(state_size=env.observation_space.shape[0],
-                        action_size=env.action_space.shape[0],
-                        tau=config.tau,
-                        hidden_size=config.hidden_size,
-                        learning_rate=config.learning_rate,
-                        n_action_sample = config.n_action_sample,
-                        rank = config.rank,
-                        mask_prob = config.mask_prob,
-                        lambda_struct = config.lambda_struct,
-                        device=device)
+    with wandb.init(
+        project="Offline SAC Exp (halfcheetah-medium-v2)",
+        group="SVRL-SAC",
+        name=config.run_name,
+        mode="offline",
+        config=vars(config),
+    ):
+        agent = SVRLSAC(
+            state_size=env.observation_space.shape[0],
+            action_size=env.action_space.shape[0],
+            tau=config.tau,
+            hidden_size=config.hidden_size,
+            learning_rate=config.learning_rate,
+            mask_prob=config.mask_prob,
+            lambda_struct=config.lambda_struct,
+            zeta=config.zeta,
+            device=device,
+        )
 
         wandb.watch(agent, log="gradients", log_freq=10)
         if config.log_video:
-            env = gym.wrappers.Monitor(env, './video', video_callable=lambda x: x%10==0, force=True)
+            env = gym.wrappers.Monitor(env, './video', video_callable=lambda x: x % 10 == 0, force=True)
 
+        # initial eval
         eval_reward = evaluate(env, agent)
         eval_score = d4rl_score(config.env, eval_reward)
         sample_states, sample_actions, _, _, _ = next(iter(dataloader))
         avg_rank = log_approximate_rank(agent, sample_states, sample_actions, num_samples=10, sample_size=(64, 64), delta=0.01)
-        wandb.log({"Test Reward": eval_reward,"score":eval_score, "Episode": 0, "Batches": batches, "Avg_Rank" : avg_rank}, step=batches)
-        for i in range(1, config.episodes+1):
 
-            pbar = tqdm(enumerate(dataloader), total = len(dataloader),
-                        desc = f"Episode {i}/{config.episodes}", unit = "batch", leave = False)
+        wandb.log(
+            {"Test Reward": eval_reward, "score": eval_score, "Episode": 0, "Batches": batches, "Avg_Rank": avg_rank},
+            step=batches,
+        )
+
+        for i in range(1, config.episodes + 1):
+            pbar = tqdm(
+                enumerate(dataloader),
+                total=len(dataloader),
+                desc=f"Episode {i}/{config.episodes}",
+                unit="batch",
+                leave=False,
+            )
 
             for batch_idx, experience in pbar:
                 states, actions, rewards, next_states, dones = experience
@@ -133,51 +149,95 @@ def train(config):
                 rewards = rewards.to(device)
                 next_states = next_states.to(device)
                 dones = dones.to(device)
-                policy_loss, alpha_loss, bellmann_error1, bellmann_error2, current_alpha = agent.learn((states, actions, rewards, next_states, dones))
+
+                # NEW: learn() returns 9 values (including dbg dict)
+                (
+                    policy_loss,
+                    alpha_loss,
+                    bellmann_error1,
+                    bellmann_error2,
+                    current_alpha,
+                    zeta_val,
+                    grid_std,
+                    recon_std,
+                ) = agent.learn((states, actions, rewards, next_states, dones))
+
                 batches += 1
+
+                # per-batch logging (light)
+                wandb.log(
+                    {
+                        "Policy Loss": policy_loss,
+                        "Alpha Loss": alpha_loss,
+                        "Bellman error 1": bellmann_error1,
+                        "Bellman error 2": bellmann_error2,
+                        "Alpha": current_alpha,
+                        "Zeta": zeta_val,
+                        "Std/grid": grid_std,
+                        "Std/recon": recon_std,
+                        "Batches": batches,
+                        "Episode": i
+                    },
+                    step=batches,
+                )
 
             if i % config.eval_every == 0:
                 eval_reward = evaluate(env, agent)
                 eval_score = d4rl_score(config.env, eval_reward)
                 sample_states, sample_actions, _, _, _ = next(iter(dataloader))
-                avg_rank = log_approximate_rank(agent, sample_states, sample_actions, num_samples=10, sample_size=(64, 64), delta=0.01)
-                wandb.log({"Test Reward": eval_reward, "Test Score": eval_score, "Episode": i, "Batches": batches, "Avg_Rank" : avg_rank}, step=batches)
+                avg_rank = log_approximate_rank(
+                    agent, sample_states, sample_actions, num_samples=10, sample_size=(64, 64), delta=0.01
+                )
+                wandb.log(
+                    {
+                        "Test Reward": eval_reward,
+                        "Test Score": eval_score,
+                        "Episode": i,
+                        "Batches": batches,
+                        "Avg_Rank": avg_rank,
+                    },
+                    step=batches,
+                )
 
                 average10.append(eval_reward)
-                print("Episode: {} | Reward: {} | Score: {} | Policy Loss: {} | Batches: {}".format(i, eval_reward, eval_score, policy_loss, batches,))
-            
-            wandb.log({
-                       "Average10": np.mean(average10),
-                       "Policy Loss": policy_loss,
-                       "Alpha Loss": alpha_loss,
-                       "Bellman error 1": bellmann_error1,
-                       "Bellman error 2": bellmann_error2,
-                       "Alpha": current_alpha,
-                       "Batches": batches,
-                       "Episode": i})
+                print(
+                    "Episode: {} | Reward: {} | Score: {} | Policy Loss: {} | Batches: {}".format(
+                        i, eval_reward, eval_score, policy_loss, batches
+                    )
+                )
 
-            if (i %10 == 0) and config.log_video:
+            if (i % 10 == 0) and config.log_video:
                 mp4list = glob.glob('video/*.mp4')
                 if len(mp4list) > 1:
                     mp4 = mp4list[-2]
-                    wandb.log({"gameplays": wandb.Video(mp4, caption='episode: '+str(i-10), fps=4, format="gif"), "Episode": i})
+                    wandb.log(
+                        {"gameplays": wandb.Video(mp4, caption='episode: ' + str(i - 10), fps=4, format="gif"),
+                         "Episode": i},
+                        step=batches,
+                    )
 
             if i % config.save_every == 0:
-                save(config, save_name="IQL", model=agent.actor_local, wandb=wandb, ep=0)
+                save(config, save_name="SVRL", model=agent.actor_local, wandb=wandb, ep=0)
 
             if i % 50 == 0:
-                headers = {"Authorization" : "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjU1MDczOCwidXVpZCI6IjJkMTY0NzU1LTFjZjUtNDgwMi04YTNkLWE4ZTkyMGYwNGQ3YiIsImlzX2FkbWluIjpmYWxzZSwiYmFja3N0YWdlX3JvbGUiOiIiLCJpc19zdXBlcl9hZG1pbiI6ZmFsc2UsInN1Yl9uYW1lIjoiIiwidGVuYW50IjoiYXV0b2RsIiwidXBrIjoiIn0.qP-FY_mf7kx38tRnSDZTBC8_IMMGkH9baLTJ1QYDUL1_ytTKkPGGKjCaqp0vh5EO5Q8oybxEFDkPbRSmXgEP7Q"}
-                resp = requests.post("https://www.autodl.com/api/v1/wechat/message/send",
-                     json={
-                         "title": "HalfCateech Exp (Medium v2)",
-                         "name": "SVRL method",
-                         "content": "Episode: {} | Reward: {} | Score: {} | Policy Loss: {} | Batches: {}".format(i, eval_reward, eval_score, policy_loss, batches,)
-                     }, headers = headers)
+                headers = {"Authorization": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjU1MDczOCwidXVpZCI6IjJkMTY0NzU1LTFjZjUtNDgwMi04YTNkLWE4ZTkyMGYwNGQ3YiIsImlzX2FkbWluIjpmYWxzZSwiYmFja3N0YWdlX3JvbGUiOiIiLCJpc19zdXBlcl9hZG1pbiI6ZmFsc2UsInN1Yl9uYW1lIjoiIiwidGVuYW50IjoiYXV0b2RsIiwidXBrIjoiIn0.qP-FY_mf7kx38tRnSDZTBC8_IMMGkH9baLTJ1QYDUL1_ytTKkPGGKjCaqp0vh5EO5Q8oybxEFDkPbRSmXgEP7Q"}
+                resp = requests.post(
+                    "https://www.autodl.com/api/v1/wechat/message/send",
+                    json={
+                        "title": "HalfCateech Exp (Medium v2)",
+                        "name": "SVRL method",
+                        "content": "Episode: {} | Reward: {} | Score: {} | Policy Loss: {} | Batches: {}".format(
+                            i, eval_reward, eval_score, policy_loss, batches
+                        ),
+                    },
+                    headers=headers,
+                )
                 print(resp.content.decode())
+
 
 if __name__ == "__main__":
     base_config = get_config()
-    seeds = [1101, 927, 1229, 618, 45]
+    seeds = [927, 1229, 618, 45]
     for seed in seeds:
         config = argparse.Namespace(**vars(base_config))
         config.seed = seed

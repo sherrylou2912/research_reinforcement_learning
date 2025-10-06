@@ -3,8 +3,8 @@ import numpy as np
 from torch.linalg import svd
 
 
-def softimp(qmat_tensor, mask_prob=0.3, rank=None, n_iter=10, 
-            tol=1e-3, zeta = 50.0, verbose=False, mask = None):
+def softimp(qmat_tensor,  mask = None, mask_prob=0.3, n_iter=10, zeta = 30.0, 
+            tol=1e-3, verbose=False):
     """
     Efficient SoftImpute using PyTorch (GPU-compatible, no normalization).
     Args:

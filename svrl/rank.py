@@ -31,7 +31,7 @@ def sample_q_submatrix(agent, states, actions, sample_size = (128,128)):
     action_expand = sampled_actions.unsqueeze(0).repeat(num_states, 1, 1).view(-1, actions.shape[1])
 
     with torch.no_grad():
-        q_values = agent.sampling_critic1(state_expand, action_expand).view(num_states, num_actions)
+        q_values = agent.critic1(state_expand, action_expand).view(num_states, num_actions)
 
     return q_values.cpu().numpy()
 
